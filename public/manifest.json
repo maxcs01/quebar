@@ -1,0 +1,21 @@
+{
+  "short_name": "QUEBAR",
+  "name": "QUEBAR - Caminhada Cristã & Hábitos",
+  "icons": [
+    {
+      "src": "/logoo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logoo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#f59e0b",
+  "display": "standalone",
+  "orientation": "portrait"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "QUEBAR",
+  "description": "Aplicativo de desenvolvimento espiritual cristão com controle de hábitos, oração contemplativa, sistema de níveis, estatísticas e medalhas (trunfos).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
