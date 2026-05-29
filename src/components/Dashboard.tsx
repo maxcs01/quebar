@@ -42,12 +42,12 @@ interface DashboardProps {
 
 const SPIRITUAL_QUOTES = [
   { text: "Aquietai-vos, e sabei que eu sou Deus.", author: "Salmos 46:10" },
-  { text: "Senhor, fazei-me instrumento de vossa paz.", author: "São Francisco de Assis" },
-  { text: "A oração é o encontro da nossa sede com a sede divina.", author: "Agostinho de Hipona" },
-  { text: "Nada te perturbe, nada te espante, tudo passa, Deus não muda.", author: "Santa Teresa de Ávila" },
-  { text: "No entardecer da vida, seremos julgados pelo amor.", author: "São João da Cruz" },
   { text: "Mas tu, quando orares, entra no teu quarto e, fechada a porta, ora a teu Pai que está em secreto.", author: "Mateus 6:6" },
-  { text: "Deus é o templo silencioso das almas que vivem em retidão e verdade.", author: "Imitação de Cristo" }
+  { text: "Tudo posso naquele que me fortalece.", author: "Filipenses 4:13" },
+  { text: "O Senhor é o meu pastor, nada me faltará.", author: "Salmos 23:1" },
+  { text: "Mas os que esperam no Senhor renovarão as suas forças; subirão com asas como águias.", author: "Isaías 40:31" },
+  { text: "Disse-lhe Jesus: Eu sou o caminho, e a verdade, e a vida; ninguém vem ao Pai senão por mim.", author: "João 14:6" },
+  { text: "Se Deus é por nós, quem será contra nós?", author: "Romanos 8:31" }
 ];
 
 export default function Dashboard({
@@ -62,8 +62,8 @@ export default function Dashboard({
   onSaveReflection,
   onNavigateToTab
 }: DashboardProps) {
-  // Mobile combined sub-tabs navigation: 'panel' for Dashboard tracker, 'prayer' for Silent timer, 'diary' for Journaling
-  const [subTab, setSubTab] = useState<'panel' | 'prayer' | 'diary'>('panel');
+  // Mobile combined sub-tabs navigation: 'prayer' for Silent timer, 'panel' for Dashboard tracker
+  const [subTab, setSubTab] = useState<'prayer' | 'panel'>('prayer');
 
   // Custom habit creation states (nested in Painel subTab)
   const [showAddHabitForm, setShowAddHabitForm] = useState(false);
@@ -185,7 +185,6 @@ export default function Dashboard({
         <div className="bg-slate-950 px-3.5 py-2 rounded-2xl flex items-center gap-2 border border-slate-850 text-xs text-slate-400 font-mono w-full md:w-auto justify-between md:justify-start">
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-            <span>Vigília do Dia:</span>
           </div>
           <strong className="text-amber-500 font-extrabold">{currentDateStr}</strong>
         </div>
@@ -210,19 +209,6 @@ export default function Dashboard({
       {/* SUB-TABS SELECTOR FOR INNER DASHBOARD COMBINED VIEW */}
       <div className="bg-slate-900/80 p-1.5 rounded-2xl border border-slate-850 flex gap-1 overflow-x-auto scrollbar-none">
         <button
-          id="btn-subtab-panel"
-          onClick={() => setSubTab('panel')}
-          className={`flex-1 min-w-[100px] text-center py-2.5 px-3 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
-            subTab === 'panel'
-              ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
-          }`}
-        >
-          <Compass className="w-4 h-4 shrink-0" />
-          <span>Painel Cruz</span>
-        </button>
-
-        <button
           id="btn-subtab-prayer"
           onClick={() => setSubTab('prayer')}
           className={`flex-1 min-w-[100px] text-center py-2.5 px-3 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
@@ -232,36 +218,26 @@ export default function Dashboard({
           }`}
         >
           <Clock className="w-4 h-4 shrink-0" />
-          <span>Oração &amp; Vigília</span>
+          <span>Oração</span>
         </button>
 
         <button
-          id="btn-subtab-diary"
-          onClick={() => setSubTab('diary')}
+          id="btn-subtab-panel"
+          onClick={() => setSubTab('panel')}
           className={`flex-1 min-w-[100px] text-center py-2.5 px-3 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
-            subTab === 'diary'
+            subTab === 'panel'
               ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'text-slate-400 hover:text-slate-300 hover:bg-slate-850'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <BookOpen className="w-4 h-4 shrink-0" />
-          <span>Diário Cristão</span>
+          <Compass className="w-4 h-4 shrink-0" />
+          <span>Painel</span>
         </button>
       </div>
 
       {/* Tab Contents Renderer */}
-      <AnimatePresence mode="wait">
-        
-        {/* SUBTAB 1: PAINEL / DEVOTION HABITS LIST */}
-        {subTab === 'panel' && (
-          <motion.div
-            key="subtab-panel"
-            initial={{ opacity: 0, scale: 0.99 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.99 }}
-            transition={{ duration: 0.18 }}
-            className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
-          >
+      <div className={subTab === 'panel' ? 'block' : 'hidden'}>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Meta do Dia circular chart card */}
             <div className="lg:col-span-5 bg-gradient-to-br from-slate-900 to-indigo-950/20 border border-slate-850 p-5 rounded-3xl space-y-6">
               <div className="flex justify-between items-start">
@@ -538,138 +514,18 @@ export default function Dashboard({
                 </span>
               </div>
             </div>
-          </motion.div>
-        )}
+        </div>
+      </div>
 
-        {/* SUBTAB 2: ORAÇÃO & VIGÍLIA / TIMER TAB INTEGRATED */}
-        {subTab === 'prayer' && (
-          <motion.div
-            key="subtab-prayer"
-            initial={{ opacity: 0, scale: 0.99 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.99 }}
-            transition={{ duration: 0.18 }}
-          >
-            <TimerTab 
-              onCompleteMeditation={onCompleteMeditation}
-              userIdName={profile.name}
-            />
-          </motion.div>
-        )}
-
-        {/* SUBTAB 3: DIÁRIO CRISTÃO / REFLECTION WORKSPACES */}
-        {subTab === 'diary' && (
-          <motion.div
-            key="subtab-diary"
-            initial={{ opacity: 0, scale: 0.99 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.99 }}
-            transition={{ duration: 0.18 }}
-            className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
-          >
-            {/* Journaling form box */}
-            <div className="lg:col-span-7 bg-slate-900 border border-slate-850 p-5 rounded-3xl space-y-4">
-              <div>
-                <h3 className="text-slate-100 font-bold text-sm flex items-center gap-2">
-                  <BookOpen className="text-indigo-400 w-4.5 h-4.5 shrink-0" />
-                  Caderno de Devocional Cristão
-                </h3>
-                <p className="text-slate-400 text-xs mt-0.5">
-                  Escreva orações, versículos especiais ou reflexões sobre o agir de Deus na sua caminhada de hoje.
-                </p>
-              </div>
-
-              <textarea
-                id="reflection-textbox"
-                rows={6}
-                maxLength={600}
-                placeholder="Hoje me senti grato a Deus pela minha saúde... Sinto que consegui ler os Salmos em profunda comunhão com Cristo..."
-                value={journalText}
-                onChange={(e) => setJournalText(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-850 rounded-2xl p-4 text-slate-200 placeholder:text-slate-600 text-xs focus:border-amber-500 focus:outline-none transition-colors"
-              />
-
-              <div className="flex items-center justify-between font-mono text-[10px] text-slate-500">
-                <span>{journalText.length}/600 caracteres (ganhe +10 XP ao salvar)</span>
-                <button
-                  id="btn-save-diary-reflex"
-                  type="button"
-                  onClick={handleJournalSave}
-                  className="px-4 py-2 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-slate-100 font-extrabold text-xs rounded-xl shadow-md transition-colors active:scale-95 duration-150 cursor-pointer"
-                >
-                  Salvar Oração de Hoje
-                </button>
-              </div>
-
-              <AnimatePresence>
-                {savedJournalFeedback && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold justify-end"
-                  >
-                    ✓ Diário espiritual atualizado com sucesso! +10 XP concedidos.
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Notification Reminders preferences panel */}
-            <div className="lg:col-span-5 bg-slate-900 border border-slate-850 p-5 rounded-3xl space-y-4">
-              <div>
-                <h3 className="text-slate-100 font-bold text-sm flex items-center gap-2">
-                  <Bell className="text-amber-500 w-4.5 h-4.5 shrink-0" />
-                  Configurar Notificações
-                </h3>
-                <p className="text-slate-400 text-xs mt-0.5">
-                  Não falhe em suas consagrações. Programe os alertas periódicos de vigilância e leitura bíblica.
-                </p>
-              </div>
-
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center justify-between bg-slate-950 p-3.5 rounded-2xl border border-slate-850">
-                  <div>
-                    <span className="text-xs font-bold text-slate-200 block">Lembretes Inteligentes</span>
-                    <span className="text-[9px] text-slate-500 block">Ativar avisos de tela integrados</span>
-                  </div>
-                  <button
-                    id="toggle-dash-reminders"
-                    type="button"
-                    onClick={() => setRemindersEnabled(!remindersEnabled)}
-                    className={`w-10 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none cursor-pointer ${remindersEnabled ? 'bg-amber-500' : 'bg-slate-800'}`}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-slate-950 transition-all ${remindersEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </button>
-                </div>
-
-                <button
-                  id="btn-test-alert"
-                  onClick={triggerNotificationLocalTest}
-                  disabled={!remindersEnabled}
-                  className="w-full text-center py-2 bg-slate-950 hover:bg-slate-900 text-slate-300 text-xs font-bold rounded-xl border border-slate-850 transition-colors disabled:opacity-40"
-                >
-                  {notificationStatus ? notificationStatus : "Simular Lembrete de Clamor"}
-                </button>
-              </div>
-
-              {/* Devotional Streaks tips box */}
-              <div className="bg-slate-950 p-3 rounded-2xl border border-slate-850 grid grid-cols-12 gap-2.5">
-                <div className="col-span-2 text-indigo-400 flex justify-center pt-0.5">
-                  <Heart className="w-4 h-4 fill-indigo-400/10" />
-                </div>
-                <div className="col-span-10">
-                  <span className="text-[10px] font-bold text-slate-300 block">Fidelidade às 10 Semanas</span>
-                  <span className="text-[10px] text-slate-400 leading-relaxed block mt-0.5">
-                    Os trunfos no QUEBAR recompensam sequências consistentes de 1, 3, 10, 15 dias e 10 semanas de hábitos e orações concluídos. Mantenha seu diário em dia para reforçar sua fé.
-                  </span>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-      </AnimatePresence>
+      {/* SUBTAB 2: ORAÇÃO / TIMER TAB INTEGRATED */}
+      <div className={subTab === 'prayer' ? 'block' : 'hidden'}>
+        <div>
+          <TimerTab 
+            onCompleteMeditation={onCompleteMeditation}
+            userIdName={profile.name}
+          />
+        </div>
+      </div>
 
     </motion.div>
   );

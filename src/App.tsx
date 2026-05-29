@@ -376,8 +376,8 @@ export default function App() {
           
           {/* Logo Name */}
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-gradient-to-tr from-amber-600 to-indigo-600 rounded-xl shadow-md">
-              <Compass className="w-5 h-5 text-slate-950 stroke-[2.5]" />
+            <div className="w-10 h-10 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80 flex items-center justify-center p-0.5">
+              <img src="/logoo.png" alt="Logo QUEBAR" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
             </div>
             <div>
               <h1 className="text-sm font-black tracking-widest text-slate-100 font-sans">QUEBAR</h1>
@@ -425,43 +425,38 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 pb-24">
         
-        {/* Render Tab Views Dynamically */}
-        <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && (
-            <Dashboard 
-              key="dash"
-              habits={habits}
-              history={history}
-              profile={profile}
-              currentDateStr={currentDateStr}
-              onToggleHabit={handleToggleHabit}
-              onAddHabit={handleAddHabit}
-              onDeleteHabit={handleDeleteHabit}
-              onCompleteMeditation={handleCompleteMeditation}
-              onSaveReflection={handleSaveReflection}
-              onNavigateToTab={setActiveTab}
-            />
-          )}
+        {/* Render Tab Views with CSS visibility classes so components like Timer keep working in background */}
+        <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}>
+          <Dashboard 
+            habits={habits}
+            history={history}
+            profile={profile}
+            currentDateStr={currentDateStr}
+            onToggleHabit={handleToggleHabit}
+            onAddHabit={handleAddHabit}
+            onDeleteHabit={handleDeleteHabit}
+            onCompleteMeditation={handleCompleteMeditation}
+            onSaveReflection={handleSaveReflection}
+            onNavigateToTab={setActiveTab}
+          />
+        </div>
 
-          {activeTab === 'trophies' && (
-            <TrophiesTab
-              key="trophies"
-              profile={profile}
-              habits={habits}
-              history={history}
-            />
-          )}
+        <div className={activeTab === 'trophies' ? 'block' : 'hidden'}>
+          <TrophiesTab
+            profile={profile}
+            habits={habits}
+            history={history}
+          />
+        </div>
 
-          {activeTab === 'stats' && (
-            <StatsTab
-              key="stats"
-              habits={habits}
-              history={history}
-              streak={profile.streak}
-              maxStreak={profile.maxStreak}
-            />
-          )}
-        </AnimatePresence>
+        <div className={activeTab === 'stats' ? 'block' : 'hidden'}>
+          <StatsTab
+            habits={habits}
+            history={history}
+            streak={profile.streak}
+            maxStreak={profile.maxStreak}
+          />
+        </div>
 
       </main>
 
