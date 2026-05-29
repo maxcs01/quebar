@@ -77,9 +77,68 @@ export default function App() {
   // Appwrite Sync States
   const [userId] = useState(() => getOrCreateUserId());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [appwriteConnected, setAppwriteConnected] = useState<boolean>(isAppwriteConfigured);
+  const [appwriteConnected, setAppwriteConnected] = useState<boolean>(() => isAppwriteConfigured());
   const [showAppwriteModal, setShowAppwriteModal] = useState<boolean>(false);
   const skipNextSaveSyncRef = useRef<boolean>(false);
+
+  // Load Appwrite forms setup from local storage or environment
+  const [appwriteEndpoint, setAppwriteEndpoint] = useState(() => localStorage.getItem('appwrite_endpoint') || 'https://cloud.appwrite.io/v1');
+  const [appwriteProjectId, setAppwriteProjectId] = useState(() => localStorage.getItem('appwrite_project_id') || '');
+  const [appwriteDatabaseId, setAppwriteDatabaseId] = useState(() => localStorage.getItem('appwrite_database_id') || 'santuario_db');
+  const [appwriteProfileColl, setAppwriteProfileColl] = useState(() => localStorage.getItem('appwrite_profile_col') || 'santuario_perfil');
+  const [appwriteHabitsColl, setAppwriteHabitsColl] = useState(() => localStorage.getItem('appwrite_habits_col') || 'santuario_habitos');
+  const [appwriteHistoryColl, setAppwriteHistoryColl] = useState(() => localStorage.getItem('appwrite_history_col') || 'santuario_historico');
+
+  // Trigger full sync load function
+  const triggerAppwriteSync = (targetUserId: string = userId, quiet: boolean = false) => {
+    if (!isAppwriteConfigured()) {
+      if (!quiet) alert("Appwrite não está configurado com Project ID.");
+      return Promise.resolve(false);
+    }
+    setIsSyncing(true);
+    return loadUserDataFromAppwrite(targetUserId).then(cloudData => {
+      skipNextSaveSyncRef.current = true;
+      if (cloudData) {
+        if (cloudData.profile) {
+          setProfile(cloudData.profile);
+          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
+        } else {
+          saveProfileToAppwrite(targetUserId, profile);
+        }
+
+        if (cloudData.habits) {
+          setHabits(cloudData.habits);
+          localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
+        } else {
+          saveHabitsToAppwrite(targetUserId, habits);
+        }
+
+        if (cloudData.history) {
+          setHistory(cloudData.history);
+          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
+        } else {
+          saveHistoryToAppwrite(targetUserId, history);
+        }
+        setAppwriteConnected(true);
+        if (!quiet) alert("Sincronização realizada com sucesso! Seus dados espirituais estão sincronizados na nuvem.");
+        return true;
+      } else {
+        // First sync for a new account: push current local state up to populate cloud
+        saveProfileToAppwrite(targetUserId, profile);
+        saveHabitsToAppwrite(targetUserId, habits);
+        saveHistoryToAppwrite(targetUserId, history);
+        setAppwriteConnected(true);
+        if (!quiet) alert("Conexão estabelecida! O progresso local foi enviado para o Appwrite para inicializar sua nuvem.");
+        return true;
+      }
+    }).catch(err => {
+      console.warn('Appwrite sync failure:', err);
+      if (!quiet) alert(`Falha de sincronização: ${err.message || err}`);
+      return false;
+    }).finally(() => {
+      setIsSyncing(false);
+    });
+  };
 
   // Level up alert state
   const [showLevelUpModal, setShowLevelUpModal] = useState<boolean>(false);
@@ -123,7 +182,7 @@ export default function App() {
     setProfile(initialProfile);
 
     // Phase B: Fetch from Appwrite in background to load remote database matches
-    if (isAppwriteConfigured) {
+    if (isAppwriteConfigured()) {
       setIsSyncing(true);
       loadUserDataFromAppwrite(userId).then(cloudData => {
         if (cloudData) {
@@ -167,25 +226,25 @@ export default function App() {
   useEffect(() => {
     if (habits.length > 0) {
       localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(habits));
-      if (isAppwriteConfigured && !skipNextSaveSyncRef.current) {
+      if (appwriteConnected && isAppwriteConfigured() && !skipNextSaveSyncRef.current) {
         saveHabitsToAppwrite(userId, habits);
       }
     }
-  }, [habits, userId]);
+  }, [habits, userId, appwriteConnected]);
 
   useEffect(() => {
     if (history.length >= 0) {
       localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
-      if (isAppwriteConfigured && !skipNextSaveSyncRef.current) {
+      if (appwriteConnected && isAppwriteConfigured() && !skipNextSaveSyncRef.current) {
         saveHistoryToAppwrite(userId, history);
       }
     }
-  }, [history, userId]);
+  }, [history, userId, appwriteConnected]);
 
   useEffect(() => {
     if (profile.xp >= 0) {
       localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-      if (isAppwriteConfigured && !skipNextSaveSyncRef.current) {
+      if (appwriteConnected && isAppwriteConfigured() && !skipNextSaveSyncRef.current) {
         saveProfileToAppwrite(userId, profile);
       }
     }
@@ -193,7 +252,7 @@ export default function App() {
     if (skipNextSaveSyncRef.current) {
       setTimeout(() => { skipNextSaveSyncRef.current = false; }, 500);
     }
-  }, [profile, userId]);
+  }, [profile, userId, appwriteConnected]);
 
   // Level Up logic validator: Analyzes XP modifications and transitions levels
   const checkLevelUp = (currentXP: number, previousLevel: number) => {
@@ -679,39 +738,137 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Form de Configuração Manual */}
+              <div className="bg-slate-950 p-5 rounded-2xl border border-slate-850/60 space-y-4 text-left">
+                <h4 className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                  Configurar Chaves de Conexão do Appwrite
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Preencha os dados do seu projeto do Appwrite Console abaixo. Eles são armazenados de forma segura localmente e ativam a sincronização retroativa na nuvem em tempo real.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Appwrite Endpoint URL</label>
+                    <input
+                      type="text"
+                      value={appwriteEndpoint}
+                      onChange={(e) => setAppwriteEndpoint(e.target.value)}
+                      placeholder="https://cloud.appwrite.io/v1"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Project ID <span className="text-rose-400">*</span></label>
+                    <input
+                      type="text"
+                      value={appwriteProjectId}
+                      onChange={(e) => setAppwriteProjectId(e.target.value)}
+                      placeholder="Inserir ID do seu projeto Appwrite"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Database ID</label>
+                    <input
+                      type="text"
+                      value={appwriteDatabaseId}
+                      onChange={(e) => setAppwriteDatabaseId(e.target.value)}
+                      placeholder="santuario_db"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Perfil</label>
+                    <input
+                      type="text"
+                      value={appwriteProfileColl}
+                      onChange={(e) => setAppwriteProfileColl(e.target.value)}
+                      placeholder="santuario_perfil"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500/50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Hábitos</label>
+                    <input
+                      type="text"
+                      value={appwriteHabitsColl}
+                      onChange={(e) => setAppwriteHabitsColl(e.target.value)}
+                      placeholder="santuario_habitos"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500/50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Histórico</label>
+                    <input
+                      type="text"
+                      value={appwriteHistoryColl}
+                      onChange={(e) => setAppwriteHistoryColl(e.target.value)}
+                      placeholder="santuario_historico"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500/50"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={() => {
+                      if (!appwriteProjectId.trim()) {
+                        alert("Por favor, preencha o seu Project ID do Appwrite.");
+                        return;
+                      }
+                      localStorage.setItem('appwrite_endpoint', appwriteEndpoint);
+                      localStorage.setItem('appwrite_project_id', appwriteProjectId);
+                      localStorage.setItem('appwrite_database_id', appwriteDatabaseId);
+                      localStorage.setItem('appwrite_profile_col', appwriteProfileColl);
+                      localStorage.setItem('appwrite_habits_col', appwriteHabitsColl);
+                      localStorage.setItem('appwrite_history_col', appwriteHistoryColl);
+                      
+                      const active = isAppwriteConfigured();
+                      setAppwriteConnected(active);
+                      alert("Credenciais salvas com sucesso! Clique em 'Testar Conexão Cloud' abaixo para validar a comunicação.");
+                    }}
+                    className="px-4 py-1.5 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-400 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Salvar Credenciais
+                  </button>
+                </div>
+              </div>
+
               {/* Description how to setup */}
               <div className="space-y-4 text-xs text-slate-400 leading-relaxed">
                 <div className="space-y-1">
-                  <p className="font-bold text-slate-200">Como ativar a sincronização com seu Appwrite?</p>
+                  <p className="font-bold text-slate-200">Alternativa: Configurar via Variáveis de Ambiente (.env)</p>
                   <p>
-                    Pluge suas credenciais nas variáveis de ambiente do seu projeto ou use o Painel de Segredos (Secrets) do seu console de build informando as variáveis:
+                    Se preferir, forneça estas chaves no seu ambiente de compilação ou console do projeto:
                   </p>
                 </div>
 
                 <div className="bg-slate-950 rounded-xl p-3 border border-slate-850 font-mono text-[11px] text-amber-500 space-y-1">
                   <div>VITE_APPWRITE_ENDPOINT="https://cloud.appwrite.io/v1"</div>
-                  <div>VITE_APPWRITE_PROJECT_ID="seu-project-id-do-appwrite"</div>
+                  <div>VITE_APPWRITE_PROJECT_ID="seu-project-id"</div>
                   <div>VITE_APPWRITE_DATABASE_ID="santuario_db"</div>
                 </div>
 
                 <div className="space-y-2 border-t border-slate-800 pt-3">
-                  <p className="font-bold text-slate-200">Passo a Passo de Configuração no Appwrite Console:</p>
+                  <p className="font-bold text-slate-200">Requisitos no Painel do Appwrite Console:</p>
                   <ol className="list-decimal list-inside space-y-1.5 pl-1">
-                    <li>Copie ou crie um projeto Web e adicione as chaves acima.</li>
-                    <li>No menu <strong>Databases</strong>, crie um banco de dados com ID <code className="bg-slate-950 px-1 py-0.5 rounded text-amber-500 font-mono">santuario_db</code>.</li>
-                    <li>Crie 3 Coleções dentro deste banco de dados com os seguintes IDs de Coleção:
-                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5">
-                        <li><code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 font-mono">santuario_perfil</code></li>
-                        <li><code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 font-mono">santuario_habitos</code></li>
-                        <li><code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 font-mono">santuario_historico</code></li>
+                    <li>Crie um projeto Web e obtenha o ID do Projeto.</li>
+                    <li>No painel <strong>Databases</strong>, crie um banco de dados com ID <code className="bg-slate-950 px-1 py-0.5 rounded text-amber-500 font-mono">santuario_db</code> (ou o configurado acima).</li>
+                    <li>Crie as seguintes Coleções dentro desse banco de dados com seus respectivos IDs:
+                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5 text-[11px]">
+                        <li><code className="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400 font-mono">santuario_perfil</code></li>
+                        <li><code className="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400 font-mono">santuario_habitos</code></li>
+                        <li><code className="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400 font-mono">santuario_historico</code></li>
                       </ul>
                     </li>
-                    <li>Em <strong>Settings &gt; Permissions</strong> de cada uma das três coleções, adicione a permissão de acesso para o Role <strong>"Any"</strong> e dê permissões totais (<code className="text-slate-300">Create, Read, Update, Delete</code>).</li>
-                    <li>Por fim, crie os Atributos correspondentes em cada coleção com tamanho amplo para conter nossos backups locais:
-                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5">
-                        <li>Coleção <strong>santuario_perfil</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">name</code> (String, 255), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">level</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">xp</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">streak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">maxStreak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">lastActiveDate</code> (String, 30), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">notificationPreferences</code> (String, 1000).</li>
-                        <li>Coleção <strong>santuario_habitos</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">habits_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100).</li>
-                        <li>Coleção <strong>santuario_historico</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">history_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100).</li>
+                    <li>Em <strong>Settings &gt; Permissions</strong> de cada uma das três coleções, adicione acesso para a Role <strong>"Any"</strong> com todas as permissões ligadas (<code className="text-slate-350">Create, Read, Update, Delete</code>) para permitir acesso correto do cliente.</li>
+                    <li>Na aba <strong>Attributes</strong> de cada coleção, adicione os atributos com tamanhos adequados:
+                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5 text-[11px]">
+                        <li><strong>santuario_perfil</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">name</code> (String, 255), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">level</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">xp</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">streak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">maxStreak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">lastActiveDate</code> (String, 30), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">notificationPreferences</code> (String, 1000)</li>
+                        <li><strong>santuario_habitos</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">habits_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100)</li>
+                        <li><strong>santuario_historico</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">history_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100)</li>
                       </ul>
                     </li>
                   </ol>
@@ -721,23 +878,28 @@ export default function App() {
               <div className="flex justify-end gap-3 border-t border-slate-800 pt-4">
                 <button
                   onClick={() => {
-                    setIsSyncing(true);
-                    loadUserDataFromAppwrite(userId).then(cloudData => {
-                      if (cloudData) {
+                    if (!appwriteProjectId.trim()) {
+                      alert("Por favor, preencha o seu Project ID do Appwrite.");
+                      return;
+                    }
+                    localStorage.setItem('appwrite_endpoint', appwriteEndpoint);
+                    localStorage.setItem('appwrite_project_id', appwriteProjectId);
+                    localStorage.setItem('appwrite_database_id', appwriteDatabaseId);
+                    localStorage.setItem('appwrite_profile_col', appwriteProfileColl);
+                    localStorage.setItem('appwrite_habits_col', appwriteHabitsColl);
+                    localStorage.setItem('appwrite_history_col', appwriteHistoryColl);
+
+                    triggerAppwriteSync(userId, false).then(success => {
+                      if (success) {
                         setAppwriteConnected(true);
-                        alert("Conexão com Appwrite testada com sucesso! Sincronização em nuvem ativa.");
                       } else {
-                        alert("Não foi possível carregar documentos da coleção do Appwrite. Garanta que você criou o banco 'santuario_db', as 3 coleções, definiu permissões para a role 'Any' e criou os atributos corretos.");
+                        setAppwriteConnected(false);
                       }
-                      setIsSyncing(false);
-                    }).catch(() => {
-                      alert("Falha de conexão com o servidor do Appwrite. Verifique o endpoint informado e a rede.");
-                      setIsSyncing(false);
                     });
                   }}
                   className="px-4 py-2 bg-slate-950 border border-slate-850 hover:bg-slate-900 transition-colors text-slate-200 font-semibold text-xs rounded-xl cursor-pointer"
                 >
-                  Testar Conexão Cloud
+                  {isSyncing ? "Verificando..." : "Testar Conexão Cloud"}
                 </button>
                 <button
                   onClick={() => setShowAppwriteModal(false)}

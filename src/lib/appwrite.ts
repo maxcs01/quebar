@@ -1,25 +1,57 @@
 import { Client, Databases } from 'appwrite';
 import { UserProfile, Habit, DayProgress } from '../types';
 
-const metaEnv = (import.meta as any).env || {};
-const endpoint = metaEnv.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1';
-const projectId = metaEnv.VITE_APPWRITE_PROJECT_ID || '';
-const databaseId = metaEnv.VITE_APPWRITE_DATABASE_ID || 'santuario_db';
+export interface AppwriteKeys {
+  endpoint: string;
+  projectId: string;
+  databaseId: string;
+  profileCollection: string;
+  habitsCollection: string;
+  historyCollection: string;
+}
 
-const profileCollection = metaEnv.VITE_APPWRITE_PROFILE_COLLECTION_ID || 'santuario_perfil';
-const habitsCollection = metaEnv.VITE_APPWRITE_HABITS_COLLECTION_ID || 'santuario_habitos';
-const historyCollection = metaEnv.VITE_APPWRITE_HISTORY_COLLECTION_ID || 'santuario_historico';
+export function getAppwriteConfig(): AppwriteKeys {
+  const metaEnv = (import.meta as any).env || {};
+  return {
+    endpoint: localStorage.getItem('appwrite_endpoint') || metaEnv.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
+    projectId: localStorage.getItem('appwrite_project_id') || metaEnv.VITE_APPWRITE_PROJECT_ID || '',
+    databaseId: localStorage.getItem('appwrite_database_id') || metaEnv.VITE_APPWRITE_DATABASE_ID || 'santuario_db',
+    profileCollection: localStorage.getItem('appwrite_profile_col') || metaEnv.VITE_APPWRITE_PROFILE_COLLECTION_ID || 'santuario_perfil',
+    habitsCollection: localStorage.getItem('appwrite_habits_col') || metaEnv.VITE_APPWRITE_HABITS_COLLECTION_ID || 'santuario_habitos',
+    historyCollection: localStorage.getItem('appwrite_history_col') || metaEnv.VITE_APPWRITE_HISTORY_COLLECTION_ID || 'santuario_historico',
+  };
+}
 
-export const isAppwriteConfigured = Boolean(
-  projectId && 
-  projectId !== 'undefined'
-);
+export function saveAppwriteConfig(keys: Partial<AppwriteKeys>) {
+  if (keys.endpoint !== undefined) localStorage.setItem('appwrite_endpoint', keys.endpoint);
+  if (keys.projectId !== undefined) {
+    localStorage.setItem('appwrite_project_id', keys.projectId);
+  }
+  if (keys.databaseId !== undefined) localStorage.setItem('appwrite_database_id', keys.databaseId);
+  if (keys.profileCollection !== undefined) localStorage.setItem('appwrite_profile_col', keys.profileCollection);
+  if (keys.habitsCollection !== undefined) localStorage.setItem('appwrite_habits_col', keys.habitsCollection);
+  if (keys.historyCollection !== undefined) localStorage.setItem('appwrite_history_col', keys.historyCollection);
+}
 
-export const appwriteClient = isAppwriteConfigured
-  ? new Client().setEndpoint(endpoint).setProject(projectId)
-  : null;
+export function isAppwriteConfigured(): boolean {
+  const config = getAppwriteConfig();
+  return Boolean(config.projectId && config.projectId.trim() !== '' && config.projectId !== 'undefined');
+}
 
-export const appwriteDatabases = appwriteClient ? new Databases(appwriteClient) : null;
+// Get active Databases client
+function getDatabasesInstance(): { db: Databases; config: AppwriteKeys } | null {
+  const config = getAppwriteConfig();
+  if (!config.projectId || config.projectId.trim() === '' || config.projectId === 'undefined') {
+    return null;
+  }
+  try {
+    const client = new Client().setEndpoint(config.endpoint).setProject(config.projectId);
+    return { db: new Databases(client), config };
+  } catch (err) {
+    console.warn('Failed creating Appwrite dynamic client:', err);
+    return null;
+  }
+}
 
 // Generate or retrieve persistent local user key to partition cloud storage row entries 
 export function getOrCreateUserId(): string {
@@ -33,7 +65,9 @@ export function getOrCreateUserId(): string {
 
 // 1. Sync structures to Cloud using update/create upsert protocol
 export async function saveProfileToAppwrite(userId: string, profile: UserProfile) {
-  if (!appwriteDatabases) return;
+  const instance = getDatabasesInstance();
+  if (!instance) return;
+  const { db, config } = instance;
   const data = {
     name: profile.name || 'Praticante',
     level: profile.level,
@@ -46,11 +80,11 @@ export async function saveProfileToAppwrite(userId: string, profile: UserProfile
   };
 
   try {
-    await appwriteDatabases.updateDocument(databaseId, profileCollection, userId, data);
+    await db.updateDocument(config.databaseId, config.profileCollection, userId, data);
   } catch (error: any) {
     if (error.code === 404 || error.message?.includes('not found') || error.message?.includes('Document not found')) {
       try {
-        await appwriteDatabases.createDocument(databaseId, profileCollection, userId, data);
+        await db.createDocument(config.databaseId, config.profileCollection, userId, data);
       } catch (createErr: any) {
         console.warn('Appwrite createDocument profile failed:', createErr.message);
       }
@@ -61,18 +95,20 @@ export async function saveProfileToAppwrite(userId: string, profile: UserProfile
 }
 
 export async function saveHabitsToAppwrite(userId: string, habits: Habit[]) {
-  if (!appwriteDatabases) return;
+  const instance = getDatabasesInstance();
+  if (!instance) return;
+  const { db, config } = instance;
   const data = {
     habits_list: JSON.stringify(habits),
     updated_at: new Date().toISOString()
   };
 
   try {
-    await appwriteDatabases.updateDocument(databaseId, habitsCollection, userId, data);
+    await db.updateDocument(config.databaseId, config.habitsCollection, userId, data);
   } catch (error: any) {
     if (error.code === 404 || error.message?.includes('not found') || error.message?.includes('Document not found')) {
       try {
-        await appwriteDatabases.createDocument(databaseId, habitsCollection, userId, data);
+        await db.createDocument(config.databaseId, config.habitsCollection, userId, data);
       } catch (createErr: any) {
         console.warn('Appwrite createDocument habits failed:', createErr.message);
       }
@@ -83,18 +119,20 @@ export async function saveHabitsToAppwrite(userId: string, habits: Habit[]) {
 }
 
 export async function saveHistoryToAppwrite(userId: string, history: DayProgress[]) {
-  if (!appwriteDatabases) return;
+  const instance = getDatabasesInstance();
+  if (!instance) return;
+  const { db, config } = instance;
   const data = {
     history_list: JSON.stringify(history),
     updated_at: new Date().toISOString()
   };
 
   try {
-    await appwriteDatabases.updateDocument(databaseId, historyCollection, userId, data);
+    await db.updateDocument(config.databaseId, config.historyCollection, userId, data);
   } catch (error: any) {
     if (error.code === 404 || error.message?.includes('not found') || error.message?.includes('Document not found')) {
       try {
-        await appwriteDatabases.createDocument(databaseId, historyCollection, userId, data);
+        await db.createDocument(config.databaseId, config.historyCollection, userId, data);
       } catch (createErr: any) {
         console.warn('Appwrite createDocument history failed:', createErr.message);
       }
@@ -110,12 +148,14 @@ export async function loadUserDataFromAppwrite(userId: string): Promise<{
   habits: Habit[] | null;
   history: DayProgress[] | null;
 } | null> {
-  if (!appwriteDatabases) return null;
+  const instance = getDatabasesInstance();
+  if (!instance) return null;
+  const { db, config } = instance;
   try {
     const [profileDoc, habitsDoc, historyDoc] = await Promise.allSettled([
-      appwriteDatabases.getDocument(databaseId, profileCollection, userId),
-      appwriteDatabases.getDocument(databaseId, habitsCollection, userId),
-      appwriteDatabases.getDocument(databaseId, historyCollection, userId)
+      db.getDocument(config.databaseId, config.profileCollection, userId),
+      db.getDocument(config.databaseId, config.habitsCollection, userId),
+      db.getDocument(config.databaseId, config.historyCollection, userId)
     ]);
 
     let profile: UserProfile | null = null;
