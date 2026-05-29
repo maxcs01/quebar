@@ -81,7 +81,7 @@ export default function App() {
   const skipNextSaveSyncRef = useRef<boolean>(false);
 
   // Trigger full sync load function
-  const triggerAppwriteSync = (targetUserId: string = userId, quiet: boolean = false) => {
+  const triggerAppwriteSync = (targetUserId: string = userId, quiet: boolean = true) => {
     if (!isAppwriteConfigured()) {
       if (!quiet) alert("Appwrite não está configurado com Project ID.");
       return Promise.resolve(false);
@@ -125,6 +125,7 @@ export default function App() {
     }).catch(err => {
       console.warn('Appwrite sync failure:', err);
       if (!quiet) alert(`Falha de sincronização: ${err.message || err}`);
+      setAppwriteConnected(false);
       return false;
     }).finally(() => {
       setIsSyncing(false);
@@ -135,7 +136,7 @@ export default function App() {
   const [showLevelUpModal, setShowLevelUpModal] = useState<boolean>(false);
   const [unlockedLevel, setUnlockedLevel] = useState<number>(1);
 
-  // 1. Initial State Loading from LocalStorage & Supabase Backup Sync
+  // 1. Initial State Loading from LocalStorage & Appwrite Cloud Backup Sync
   useEffect(() => {
     // Phase A: Sync-load local values immediately for snappy initial response
     const storedHabits = localStorage.getItem(HABITS_STORAGE_KEY);
@@ -202,12 +203,16 @@ export default function App() {
 
           setAppwriteConnected(true);
         } else {
-          setAppwriteConnected(false);
+          // Empty or new remote profile -> automatically push our data to cloud on start
+          saveProfileToAppwrite(userId, initialProfile);
+          saveHabitsToAppwrite(userId, initialHabits);
+          saveHistoryToAppwrite(userId, initialHistory);
+          setAppwriteConnected(true);
         }
         setIsSyncing(false);
       }).catch(err => {
-        console.warn('Appwrite cloud synchronization missed:', err);
-        setAppwriteConnected(false);
+        console.warn('Appwrite cloud synchronization missed or offline:', err);
+        setAppwriteConnected(false); // Display red cloud when offline or network fails
         setIsSyncing(false);
       });
     }
@@ -510,23 +515,23 @@ export default function App() {
           {/* Quick Profile stats */}
           <div className="flex items-center gap-2 sm:gap-4">            {/* Appwrite status indicator */}
             <button
-              onClick={() => triggerAppwriteSync(userId, false)}
+              onClick={() => triggerAppwriteSync(userId, true)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
                 appwriteConnected
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                  : 'bg-rose-500/10 text-rose-500 border-rose-500/20 hover:bg-rose-500/20'
               }`}
-              title={appwriteConnected ? "Sincronizado! Clique para recalibrar a nuvem." : "Erro de Conexão. Clique para tentar reconectar o Appwrite."}
+              title={appwriteConnected ? "Dados Sincronizados na Nuvem" : "Erro de Sincronização. Clique para reconectar."}
             >
               {isSyncing ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
               ) : appwriteConnected ? (
-                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                <Cloud className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400/20" />
               ) : (
-                <CloudOff className="w-3.5 h-3.5 text-rose-500" />
+                <Cloud className="w-3.5 h-3.5 text-rose-500 fill-rose-500/20" />
               )}
               <span className="hidden sm:inline">
-                {isSyncing ? 'Conectando...' : appwriteConnected ? 'Nuvem Ativa' : 'Nuvem Inativa'}
+                {isSyncing ? 'Sincronizando...' : appwriteConnected ? 'Sincronizado' : 'Offline'}
               </span>
             </button>
 

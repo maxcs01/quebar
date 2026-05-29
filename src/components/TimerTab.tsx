@@ -34,6 +34,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
   const [customMinutes, setCustomMinutes] = useState<number>(10);
   const [customSeconds, setCustomSeconds] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [timeLeft, setTimeLeft] = useState<number>(600);
   const [soundSelection, setSoundSelection] = useState<'gong' | 'bell' | 'bowl' | 'none'>('gong');
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -85,13 +86,19 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
     };
   }, []);
 
-  // Sync remaining seconds with duration if not running
+  // Sync remaining seconds with duration if not running and duration changed
+  useEffect(() => {
+    if (!isPlaying && !hasStarted) {
+      setTimeLeft(duration);
+    }
+  }, [duration, isPlaying, hasStarted]);
+
+  // Clean end time reference when timer is paused or stopped
   useEffect(() => {
     if (!isPlaying) {
-      setTimeLeft(duration);
       endTimeRef.current = null;
     }
-  }, [duration, isPlaying]);
+  }, [isPlaying]);
 
   // Sync scroll locations for Hours, Minutes, and Seconds wheels
   useEffect(() => {
@@ -221,6 +228,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
           if (diffSeconds <= 0) {
             // Done! Complete sequence
             setIsPlaying(false);
+            setHasStarted(false);
             setFinishedDuration(duration);
             setShowCompleteModal(true);
             onCompleteMeditation(duration, selectedTag);
@@ -255,6 +263,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
   // Handle setting preset values
   const handlePresetSelect = (minutesVal: number) => {
     setIsPlaying(false);
+    setHasStarted(false);
     const h = Math.floor(minutesVal / 60);
     const m = minutesVal % 60;
     const s = 0;
@@ -273,6 +282,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
     const computedIndex = Math.round(scrollTop / itemHeight);
     const val = Math.max(0, Math.min(23, computedIndex));
     if (val !== customHours) {
+      setHasStarted(false);
       setCustomHours(val);
       const newDuration = val * 3600 + customMinutes * 60 + customSeconds;
       setDuration(newDuration);
@@ -287,6 +297,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
     const computedIndex = Math.round(scrollTop / itemHeight);
     const val = Math.max(0, Math.min(59, computedIndex));
     if (val !== customMinutes) {
+      setHasStarted(false);
       setCustomMinutes(val);
       const newDuration = customHours * 3600 + val * 60 + customSeconds;
       setDuration(newDuration);
@@ -301,6 +312,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
     const computedIndex = Math.round(scrollTop / itemHeight);
     const val = Math.max(0, Math.min(59, computedIndex));
     if (val !== customSeconds) {
+      setHasStarted(false);
       setCustomSeconds(val);
       const newDuration = customHours * 3600 + customMinutes * 60 + val;
       setDuration(newDuration);
@@ -325,8 +337,10 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
   };
 
   // Progress circle SVG calculation
+  const radius = 118;
+  const circumference = 2 * Math.PI * radius;
   const progressRatio = duration > 0 ? (timeLeft / duration) : 0;
-  const strokeDashoffset = 2 * Math.PI * 90 * (1 - progressRatio); // circle radius is 90
+  const strokeDashoffset = circumference * (1 - progressRatio);
 
   // Breath phrase text labels
   const getBreathLabel = () => {
@@ -388,27 +402,27 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
 
           {/* Elegant Circular Progress with Interactive Center */}
           <div 
-            className="relative w-64 h-64 flex items-center justify-center select-none"
+            className="relative w-72 h-72 flex items-center justify-center select-none"
           >
             {/* SVG circle stroke */}
             <svg 
               className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" 
-              viewBox="0 0 256 256"
+              viewBox="0 0 270 270"
             >
               {/* Slate Outer ring */}
               <circle
-                cx="128"
-                cy="128"
-                r="90"
+                cx="135"
+                cy="135"
+                r={radius}
                 className="stroke-slate-950 fill-transparent stroke-[6]"
               />
               {/* Inner highlight representing remaining progress */}
               <motion.circle
-                cx="128"
-                cy="128"
-                r="90"
+                cx="135"
+                cy="135"
+                r={radius}
                 className="stroke-amber-400 fill-transparent stroke-[6] stroke-linecap-round"
-                strokeDasharray={2 * Math.PI * 90}
+                strokeDasharray={circumference}
                 animate={{ strokeDashoffset }}
                 transition={{ duration: isPlaying ? 0.5 : 0.3 }}
               />
@@ -417,17 +431,22 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
             {/* Central Breath Sphere */}
             <motion.div
               animate={{
-                scale: breathPhase === 'inhale' ? 1.15 : breathPhase === 'exhale' ? 0.85 : breathPhase === 'hold' ? 1.25 : 1,
+                scale: breathPhase === 'inhale' ? 1.08 : breathPhase === 'exhale' ? 0.90 : breathPhase === 'hold' ? 1.15 : 1,
                 borderColor: breathPhase === 'hold' ? 'rgba(245, 158, 11, 0.4)' : 'rgba(99, 102, 241, 0.3)'
               }}
               transition={{ duration: 4, ease: "easeInOut" }}
-              className="absolute w-44 h-44 rounded-full bg-slate-950 border-2 flex flex-col items-center justify-center text-center p-2 shadow-2xl z-20"
+              className="absolute w-52 h-52 rounded-full bg-slate-950 border-2 flex flex-col items-center justify-center text-center p-2 shadow-2xl z-20"
             >
-              {isPlaying ? (
+              {hasStarted ? (
                 <div className="flex flex-col items-center justify-center mt-1">
                   <span className="text-4xl font-black font-mono tracking-wider text-amber-500 selection:bg-transparent leading-none">
                     {formatTime(timeLeft)}
                   </span>
+                  {!isPlaying && (
+                    <span className="text-[10px] text-rose-500 font-bold uppercase tracking-wider mt-1.5 animate-pulse select-none">
+                      Pausado
+                    </span>
+                  )}
                   {selectedTag && (
                     <span className="text-[9px] text-slate-500 mt-2 font-bold px-2 py-0.5 bg-slate-900 rounded-full border border-slate-800 uppercase tracking-wider">
                       {tagsList.find(t => t.id === selectedTag)?.emoji} {tagsList.find(t => t.id === selectedTag)?.label}
@@ -587,6 +606,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
               id="btn-timer-reset"
               onClick={() => {
                 setIsPlaying(false);
+                setHasStarted(false);
                 setTimeLeft(duration);
               }}
               className="p-3 bg-slate-950 hover:bg-slate-850 rounded-xl border border-slate-850 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
@@ -598,7 +618,13 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
             {/* Play / Pause Toggle */}
             <button
               id="btn-timer-toggle"
-              onClick={() => setIsPlaying(!isPlaying)}
+              onClick={() => {
+                const nextPlaying = !isPlaying;
+                setIsPlaying(nextPlaying);
+                if (nextPlaying) {
+                  setHasStarted(true);
+                }
+              }}
               className={`p-5 rounded-2xl flex items-center justify-center shadow-lg transition-all transform active:scale-95 cursor-pointer ${
                 isPlaying 
                   ? 'bg-amber-600 hover:bg-amber-500 text-slate-950 shadow-amber-950/20' 
