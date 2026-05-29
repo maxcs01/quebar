@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Compass, 
@@ -12,7 +12,13 @@ import {
   Flame,
   Info,
   Heart,
-  Plus
+  Plus,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  Copy,
+  Check,
+  ExternalLink
 } from 'lucide-react';
 
 import { Habit, DayProgress, UserProfile } from './types';
@@ -20,6 +26,14 @@ import { DEFAULT_HABITS, LEVEL_THRESHOLDS, getLevelTitle } from './data/defaultD
 import Dashboard from './components/Dashboard';
 import TrophiesTab from './components/TrophiesTab';
 import StatsTab from './components/StatsTab';
+import {
+  isAppwriteConfigured,
+  getOrCreateUserId,
+  saveProfileToAppwrite,
+  saveHabitsToAppwrite,
+  saveHistoryToAppwrite,
+  loadUserDataFromAppwrite
+} from './lib/appwrite';
 
 // Localstorage keys
 const HABITS_STORAGE_KEY = 'santuario_habitos';
@@ -38,13 +52,10 @@ export default function App() {
   // Navigation State
   const [activeTab, setActiveTab] = useState<'dashboard' | 'trophies' | 'stats'>('dashboard');
 
-  // Custom simulation date (allows users/testers to skip days to test streaks!)
-  const [simulationOffset, setSimulationOffset] = useState<number>(0);
+  // Real-world date tracking
   const currentDateStr = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + simulationOffset);
-    return formatDate(d);
-  }, [simulationOffset]);
+    return formatDate(new Date());
+  }, []);
 
   // States
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -63,69 +74,126 @@ export default function App() {
     }
   });
 
+  // Appwrite Sync States
+  const [userId] = useState(() => getOrCreateUserId());
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [appwriteConnected, setAppwriteConnected] = useState<boolean>(isAppwriteConfigured);
+  const [showAppwriteModal, setShowAppwriteModal] = useState<boolean>(false);
+  const skipNextSaveSyncRef = useRef<boolean>(false);
+
   // Level up alert state
   const [showLevelUpModal, setShowLevelUpModal] = useState<boolean>(false);
   const [unlockedLevel, setUnlockedLevel] = useState<number>(1);
 
-  // 1. Initial State Loading from LocalStorage
+  // 1. Initial State Loading from LocalStorage & Supabase Backup Sync
   useEffect(() => {
+    // Phase A: Sync-load local values immediately for snappy initial response
     const storedHabits = localStorage.getItem(HABITS_STORAGE_KEY);
     const storedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
     const storedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
 
+    let initialHabits = DEFAULT_HABITS;
+    let initialHistory: DayProgress[] = [];
+    let initialProfile: UserProfile = {
+      name: 'Praticante Espiritual',
+      level: 1,
+      xp: 0,
+      streak: 0,
+      maxStreak: 0,
+      lastActiveDate: currentDateStr,
+      notificationPreferences: {
+        enabled: true,
+        morningTime: '07:00',
+        eveningTime: '21:00'
+      }
+    };
+
     if (storedHabits) {
-      setHabits(JSON.parse(storedHabits));
-    } else {
-      setHabits(DEFAULT_HABITS);
+      try { initialHabits = JSON.parse(storedHabits); } catch(e) {}
     }
-
     if (storedHistory) {
-      setHistory(JSON.parse(storedHistory));
-    } else {
-      // Create empty historical data
-      setHistory([]);
+      try { initialHistory = JSON.parse(storedHistory); } catch(e) {}
     }
-
     if (storedProfile) {
-      const parsedProfile = JSON.parse(storedProfile);
-      setProfile(parsedProfile);
-    } else {
-      // Create fresh user profile
-      const defaultProfile: UserProfile = {
-        name: 'Praticante Espiritual',
-        level: 1,
-        xp: 0,
-        streak: 0,
-        maxStreak: 0,
-        lastActiveDate: currentDateStr,
-        notificationPreferences: {
-          enabled: true,
-          morningTime: '07:00',
-          eveningTime: '21:00'
-        }
-      };
-      setProfile(defaultProfile);
+      try { initialProfile = JSON.parse(storedProfile); } catch(e) {}
     }
-  }, []);
 
-  // 2. Persistent saving engine triggers whenever state updates
+    setHabits(initialHabits);
+    setHistory(initialHistory);
+    setProfile(initialProfile);
+
+    // Phase B: Fetch from Appwrite in background to load remote database matches
+    if (isAppwriteConfigured) {
+      setIsSyncing(true);
+      loadUserDataFromAppwrite(userId).then(cloudData => {
+        if (cloudData) {
+          skipNextSaveSyncRef.current = true; // prevent reflection loop during load values trigger
+
+          if (cloudData.profile) {
+            setProfile(cloudData.profile);
+            localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
+          } else {
+            saveProfileToAppwrite(userId, initialProfile);
+          }
+
+          if (cloudData.habits) {
+            setHabits(cloudData.habits);
+            localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
+          } else {
+            saveHabitsToAppwrite(userId, initialHabits);
+          }
+
+          if (cloudData.history) {
+            setHistory(cloudData.history);
+            localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
+          } else {
+            saveHistoryToAppwrite(userId, initialHistory);
+          }
+
+          setAppwriteConnected(true);
+        } else {
+          setAppwriteConnected(false);
+        }
+        setIsSyncing(false);
+      }).catch(err => {
+        console.warn('Appwrite cloud synchronization missed:', err);
+        setAppwriteConnected(false);
+        setIsSyncing(false);
+      });
+    }
+  }, [userId]);
+
+  // 2. Persistent saving engine triggers whenever local React state updates
   useEffect(() => {
     if (habits.length > 0) {
       localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(habits));
+      if (isAppwriteConfigured && !skipNextSaveSyncRef.current) {
+        saveHabitsToAppwrite(userId, habits);
+      }
     }
-  }, [habits]);
+  }, [habits, userId]);
 
   useEffect(() => {
     if (history.length >= 0) {
       localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
+      if (isAppwriteConfigured && !skipNextSaveSyncRef.current) {
+        saveHistoryToAppwrite(userId, history);
+      }
     }
-  }, [history]);
+  }, [history, userId]);
 
   useEffect(() => {
     if (profile.xp >= 0) {
       localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      if (isAppwriteConfigured && !skipNextSaveSyncRef.current) {
+        saveProfileToAppwrite(userId, profile);
+      }
     }
-  }, [profile]);
+    // Release lock if it was active
+    if (skipNextSaveSyncRef.current) {
+      setTimeout(() => { skipNextSaveSyncRef.current = false; }, 500);
+    }
+  }, [profile, userId]);
 
   // Level Up logic validator: Analyzes XP modifications and transitions levels
   const checkLevelUp = (currentXP: number, previousLevel: number) => {
@@ -315,21 +383,30 @@ export default function App() {
   };
 
   // Concluding a meditation countdown timer
-  const handleCompleteMeditation = (seconds: number) => {
+  const handleCompleteMeditation = (seconds: number, tag: 'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura' = 'aleatorio') => {
     let existingEntryIndex = history.findIndex(entry => entry.date === currentDateStr);
     let updatedHistory = [...history];
 
+    const newSession = {
+      durationSeconds: seconds,
+      tag: tag,
+      timestamp: new Date().toISOString()
+    };
+
     if (existingEntryIndex !== -1) {
       const entry = updatedHistory[existingEntryIndex];
+      const currentSessions = entry.sessions || [];
       updatedHistory[existingEntryIndex] = {
         ...entry,
-        meditationSeconds: (entry.meditationSeconds || 0) + seconds
+        meditationSeconds: (entry.meditationSeconds || 0) + seconds,
+        sessions: [...currentSessions, newSession]
       };
     } else {
       updatedHistory.push({
         date: currentDateStr,
         habitsCompleted: [],
-        meditationSeconds: seconds
+        meditationSeconds: seconds,
+        sessions: [newSession]
       });
     }
 
@@ -362,11 +439,6 @@ export default function App() {
     }
   };
 
-  // Simulated timezone rollover (advances physical date inside state by 1 day)
-  const advanceToNextDay = () => {
-    setSimulationOffset(prev => prev + 1);
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-amber-500 selection:text-slate-950 font-sans">
       
@@ -386,16 +458,26 @@ export default function App() {
           </div>
 
           {/* Quick Profile stats */}
-          <div className="flex items-center gap-4">
-            {/* Simulation Dev Tools */}
+          <div className="flex items-center gap-2 sm:gap-4">            {/* Appwrite status indicator */}
             <button
-              id="btn-simulate-day"
-              onClick={advanceToNextDay}
-              className="text-[10px] font-semibold text-slate-500 hover:text-amber-500 bg-slate-950 hover:bg-slate-900 px-2 sm:px-2.5 py-1.5 rounded-lg border border-slate-900 transition-all flex items-center gap-1 cursor-pointer"
-              title="Simule o próximo dia útil para testar recorrências e medalhas"
+              onClick={() => setShowAppwriteModal(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
+                appwriteConnected
+                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                  : 'bg-slate-950 text-slate-400 border-slate-900 hover:text-slate-300'
+              }`}
+              title="Configurações e Sincronização Appwrite"
             >
-              <span className="hidden xs:inline sm:inline">Avançar de Dia</span>
-              <span className="inline xs:hidden sm:hidden">+1 Dia</span> ➔
+              {isSyncing ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : appwriteConnected ? (
+                <Cloud className="w-3.5 h-3.5 text-rose-400" />
+              ) : (
+                <CloudOff className="w-3.5 h-3.5 text-slate-500" />
+              )}
+              <span className="hidden sm:inline">
+                {isSyncing ? 'Sincronizando...' : appwriteConnected ? 'Appwrite Ativo' : 'Offline (Local)'}
+              </span>
             </button>
 
             <button 
@@ -406,7 +488,7 @@ export default function App() {
               <div className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
                 <User className="w-3.5 h-3.5" />
               </div>
-              <div className="hidden sm:block">
+              <div className="hidden md:block">
                 <span className="text-[10px] text-slate-400 block font-semibold leading-none">{profile.name || 'Definir Nome'}</span>
                 <span className="text-[9px] text-amber-500 block mt-0.5 font-mono">Nível {profile.level}</span>
               </div>
@@ -545,6 +627,125 @@ export default function App() {
               >
                 Seguir em Presença Plena
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Appwrite Dashboard Integration & Schema Instructions Modal */}
+      <AnimatePresence>
+        {showAppwriteModal && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.9, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, y: 20, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-3xl max-w-2xl w-full my-8 space-y-6 shadow-2xl relative text-left"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-rose-500/10 text-rose-450 rounded-xl border border-rose-500/20">
+                    <Cloud className="w-5 h-5 text-rose-450" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-100">Sincronização Cloud Appwrite</h3>
+                    <p className="text-xs text-slate-400">Armazene de forma segura toda sua jornada de hábitos e devocionais</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAppwriteModal(false)}
+                  className="p-1 px-3 bg-slate-950 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-bold border border-slate-850 cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+
+              {/* Status Section */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">Estado da Conexão</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${appwriteConnected ? 'bg-rose-500 animate-pulse' : 'bg-slate-600'}`} />
+                    <span className="text-sm font-extrabold text-slate-200">
+                      {appwriteConnected ? 'Conectado à Nuvem' : 'Armazenamento Local (Offline)'}
+                    </span>
+                  </div>
+                </div>
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">ID de Partição (USER_UID)</span>
+                  <p className="text-xs font-mono text-slate-300 select-all truncate">
+                    {userId}
+                  </p>
+                </div>
+              </div>
+
+              {/* Description how to setup */}
+              <div className="space-y-4 text-xs text-slate-400 leading-relaxed">
+                <div className="space-y-1">
+                  <p className="font-bold text-slate-200">Como ativar a sincronização com seu Appwrite?</p>
+                  <p>
+                    Pluge suas credenciais nas variáveis de ambiente do seu projeto ou use o Painel de Segredos (Secrets) do seu console de build informando as variáveis:
+                  </p>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl p-3 border border-slate-850 font-mono text-[11px] text-amber-500 space-y-1">
+                  <div>VITE_APPWRITE_ENDPOINT="https://cloud.appwrite.io/v1"</div>
+                  <div>VITE_APPWRITE_PROJECT_ID="seu-project-id-do-appwrite"</div>
+                  <div>VITE_APPWRITE_DATABASE_ID="santuario_db"</div>
+                </div>
+
+                <div className="space-y-2 border-t border-slate-800 pt-3">
+                  <p className="font-bold text-slate-200">Passo a Passo de Configuração no Appwrite Console:</p>
+                  <ol className="list-decimal list-inside space-y-1.5 pl-1">
+                    <li>Copie ou crie um projeto Web e adicione as chaves acima.</li>
+                    <li>No menu <strong>Databases</strong>, crie um banco de dados com ID <code className="bg-slate-950 px-1 py-0.5 rounded text-amber-500 font-mono">santuario_db</code>.</li>
+                    <li>Crie 3 Coleções dentro deste banco de dados com os seguintes IDs de Coleção:
+                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5">
+                        <li><code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 font-mono">santuario_perfil</code></li>
+                        <li><code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 font-mono">santuario_habitos</code></li>
+                        <li><code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400 font-mono">santuario_historico</code></li>
+                      </ul>
+                    </li>
+                    <li>Em <strong>Settings &gt; Permissions</strong> de cada uma das três coleções, adicione a permissão de acesso para o Role <strong>"Any"</strong> e dê permissões totais (<code className="text-slate-300">Create, Read, Update, Delete</code>).</li>
+                    <li>Por fim, crie os Atributos correspondentes em cada coleção com tamanho amplo para conter nossos backups locais:
+                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5">
+                        <li>Coleção <strong>santuario_perfil</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">name</code> (String, 255), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">level</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">xp</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">streak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">maxStreak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">lastActiveDate</code> (String, 30), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">notificationPreferences</code> (String, 1000).</li>
+                        <li>Coleção <strong>santuario_habitos</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">habits_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100).</li>
+                        <li>Coleção <strong>santuario_historico</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">history_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100).</li>
+                      </ul>
+                    </li>
+                  </ol>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-slate-800 pt-4">
+                <button
+                  onClick={() => {
+                    setIsSyncing(true);
+                    loadUserDataFromAppwrite(userId).then(cloudData => {
+                      if (cloudData) {
+                        setAppwriteConnected(true);
+                        alert("Conexão com Appwrite testada com sucesso! Sincronização em nuvem ativa.");
+                      } else {
+                        alert("Não foi possível carregar documentos da coleção do Appwrite. Garanta que você criou o banco 'santuario_db', as 3 coleções, definiu permissões para a role 'Any' e criou os atributos corretos.");
+                      }
+                      setIsSyncing(false);
+                    }).catch(() => {
+                      alert("Falha de conexão com o servidor do Appwrite. Verifique o endpoint informado e a rede.");
+                      setIsSyncing(false);
+                    });
+                  }}
+                  className="px-4 py-2 bg-slate-950 border border-slate-850 hover:bg-slate-900 transition-colors text-slate-200 font-semibold text-xs rounded-xl cursor-pointer"
+                >
+                  Testar Conexão Cloud
+                </button>
+                <button
+                  onClick={() => setShowAppwriteModal(false)}
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 transition-colors text-slate-950 font-black text-xs rounded-xl uppercase tracking-wider cursor-pointer"
+                >
+                  Entendi, Prosseguir
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

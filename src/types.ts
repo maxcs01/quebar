@@ -15,6 +15,11 @@ export interface DayProgress {
   habitsCompleted: string[]; // Habit IDs completed on this day
   meditationSeconds: number; // Meditation timer duration on this day
   reflection?: string; // Daily spiritual journal note
+  sessions?: {
+    durationSeconds: number;
+    tag: 'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura';
+    timestamp: string; // ISO string or time representation
+  }[];
 }
 
 export interface UserProfile {

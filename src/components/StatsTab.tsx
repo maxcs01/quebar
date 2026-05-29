@@ -97,6 +97,24 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
       const habitsCount = dayLog?.habitsCompleted?.length || 0;
       const meditationMin = Math.round((dayLog?.meditationSeconds || 0) / 60);
 
+      // Creative split! Let's calculate total prayer minutes vs total reading minutes for this day
+      let prayerSeconds = 0;
+      let readingSeconds = 0;
+      if (dayLog && dayLog.sessions && dayLog.sessions.length > 0) {
+        dayLog.sessions.forEach(s => {
+          if (s.tag === 'leitura') {
+            readingSeconds += s.durationSeconds;
+          } else {
+            prayerSeconds += s.durationSeconds;
+          }
+        });
+      } else {
+        // Fallback or legacy records
+        prayerSeconds = dayLog?.meditationSeconds || 0;
+      }
+      const prayerMin = Math.round(prayerSeconds / 60);
+      const readingMin = Math.round(readingSeconds / 60);
+
       const maxPossibleHabits = habits.length || 1;
       const completionRate = Math.round((habitsCount / maxPossibleHabits) * 100);
 
@@ -105,7 +123,9 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
         label,
         completions: habitsCount,
         percent: completionRate,
-        meditationMinutes: meditationMin
+        meditationMinutes: meditationMin,
+        prayerMinutes: prayerMin,
+        readingMinutes: readingMin
       };
     });
   }, [periodDates, history, habits, timeframe]);
@@ -158,7 +178,7 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
 
   // Finding max values for Chart scale
   const maxCompletionsInPeriod = Math.max(...chartData.map(d => d.completions), 1);
-  const maxMeditationMinInPeriod = Math.max(...chartData.map(d => d.meditationMinutes), 5);
+  const maxMeditationMinInPeriod = Math.max(...chartData.map(d => Math.max(d.prayerMinutes || 0, d.readingMinutes || 0)), 5);
 
   return (
     <motion.div 
@@ -330,36 +350,55 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
         <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
           <div>
             <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-1.5 mb-1">
-              <Clock className="w-4 h-4 text-teal-400" />
-              Tempo de Silêncio e Oração (min)
+              <Clock className="w-4 h-4 text-amber-500" />
+              Tempo de Oração vs. Leitura (min)
             </h4>
-            <div className="text-[11px] text-slate-400 mb-4 h-3 flex justify-between">
-              <span>Minutos acumulados no cronômetro</span>
+            <div className="text-[11px] text-slate-400 mb-4 flex flex-col sm:flex-row justify-between gap-1">
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500"></span> Oração</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span> Leitura</span>
+              </div>
               <span className="font-mono text-[9px]">Escala máxima: {maxMeditationMinInPeriod} min</span>
             </div>
           </div>
 
           <div className="h-44 w-full flex items-end gap-1.5 sm:gap-2 pt-4 px-1">
             {chartData.map((d, index) => {
-              const heightPercent = d.meditationMinutes > 0 
-                ? (d.meditationMinutes / maxMeditationMinInPeriod) * 100 
+              const prayerHeightPercent = d.prayerMinutes > 0 
+                ? (d.prayerMinutes / maxMeditationMinInPeriod) * 100 
+                : 3;
+              const readingHeightPercent = d.readingMinutes > 0 
+                ? (d.readingMinutes / maxMeditationMinInPeriod) * 100 
                 : 3;
               return (
                 <div key={index} className="flex-1 flex flex-col items-center group h-full justify-end cursor-default">
                   {/* Tooltip on hover */}
-                  <div className="opacity-0 group-hover:opacity-100 bg-slate-950 text-slate-100 text-[10px] px-2 py-1 rounded absolute transform -translate-y-24 transition-all z-10 pointer-events-none border border-slate-800 text-center font-mono">
-                    <p className="font-semibold text-teal-400">{d.meditationMinutes} min</p>
-                    <p className="text-slate-400 text-[9px]">{d.date}</p>
+                  <div className="opacity-0 group-hover:opacity-100 bg-slate-950 text-slate-100 text-[10px] px-2.5 py-1.5 rounded-xl absolute transform -translate-y-24 transition-all z-10 pointer-events-none border border-slate-800 text-center font-mono w-28 shadow-xl">
+                    <p className="font-bold text-amber-400 leading-tight">🙏 {d.prayerMinutes} min</p>
+                    <p className="font-bold text-indigo-400 mt-0.5 leading-tight">📖 {d.readingMinutes} min</p>
+                    <p className="text-slate-500 text-[8px] mt-1 border-t border-slate-900 pt-1">{d.date}</p>
                   </div>
 
-                  {/* Bar representing meditation mins */}
-                  <div className="w-full bg-slate-950 rounded-md overflow-hidden flex flex-col justify-end h-[85%] relative border border-slate-850">
-                    <motion.div 
-                      initial={{ height: 0 }}
-                      animate={{ height: `${heightPercent}%` }}
-                      transition={{ duration: 0.5, delay: index * 0.02 }}
-                      className={`w-full rounded-t-sm ${d.meditationMinutes > 0 ? 'bg-gradient-to-t from-teal-700 via-teal-500 to-emerald-300' : 'bg-slate-850'}`}
-                    />
+                  {/* High quality dual columns side by side */}
+                  <div className="w-full h-[85%] flex items-end gap-0.5 sm:gap-1">
+                    {/* Prayer column */}
+                    <div className="flex-1 bg-slate-950/80 rounded-md overflow-hidden flex flex-col justify-end h-full relative border border-slate-850">
+                      <motion.div 
+                        initial={{ height: 0 }}
+                        animate={{ height: `${prayerHeightPercent}%` }}
+                        transition={{ duration: 0.5, delay: index * 0.02 }}
+                        className={`w-full rounded-t-sm ${d.prayerMinutes > 0 ? 'bg-gradient-to-t from-amber-600 to-amber-400' : 'bg-slate-850'}`}
+                      />
+                    </div>
+                    {/* Reading column */}
+                    <div className="flex-1 bg-slate-950/80 rounded-md overflow-hidden flex flex-col justify-end h-full relative border border-slate-850">
+                      <motion.div 
+                        initial={{ height: 0 }}
+                        animate={{ height: `${readingHeightPercent}%` }}
+                        transition={{ duration: 0.5, delay: index * 0.015 }}
+                        className={`w-full rounded-t-sm ${d.readingMinutes > 0 ? 'bg-gradient-to-t from-indigo-700 to-indigo-500' : 'bg-slate-850'}`}
+                      />
+                    </div>
                   </div>
 
                   {/* Date label */}
@@ -445,21 +484,31 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
               return <div key={`empty-${index}`} className="aspect-square bg-transparent rounded-lg"></div>;
             }
 
-            // Calculate style depending on completionsRatio
-            let bgClass = 'bg-slate-950 border-slate-850 hover:border-slate-700';
-            let textClass = 'text-slate-400';
+            // Calculate style depending on both completions AND quiet time / reading activity
+            let bgClass = 'bg-slate-950 border-slate-850 hover:border-slate-700 text-slate-400';
             
-            if (dayObj.completionsCount > 0) {
-              textClass = 'text-slate-100 font-bold';
-              const ratio = dayObj.ratio;
-              if (ratio === 1) {
-                bgClass = 'bg-amber-500 text-slate-950 border-amber-300 font-bold';
-              } else if (ratio >= 0.7) {
-                bgClass = 'bg-indigo-500 text-slate-100 border-indigo-400 font-bold';
-              } else if (ratio >= 0.4) {
-                bgClass = 'bg-indigo-800 text-slate-200 border-indigo-600';
+            const medMinutes = Math.round(dayObj.meditationSeconds / 60);
+            const hasActivity = dayObj.completionsCount > 0 || medMinutes > 0;
+            
+            if (hasActivity) {
+              if (dayObj.completionsCount > 0 && medMinutes > 0) {
+                // Maximum synergy! Prayer + Checked items
+                bgClass = 'bg-gradient-to-br from-amber-500 to-indigo-600 border-amber-300 text-slate-100 font-extrabold shadow-sm';
+              } else if (medMinutes > 0) {
+                // Focus on prayer and quiet contemplation
+                bgClass = 'bg-teal-500/20 text-teal-300 border-teal-500/30 font-bold';
               } else {
-                bgClass = 'bg-indigo-950 text-slate-300 border-slate-800';
+                // Checked tasks only
+                const ratio = dayObj.ratio;
+                if (ratio === 1) {
+                  bgClass = 'bg-amber-500 text-slate-950 border-amber-350 font-bold';
+                } else if (ratio >= 0.7) {
+                  bgClass = 'bg-indigo-500 text-slate-105 border-indigo-400 font-bold';
+                } else if (ratio >= 0.4) {
+                  bgClass = 'bg-indigo-800 text-slate-200 border-indigo-600';
+                } else {
+                  bgClass = 'bg-indigo-950 text-slate-300 border-indigo-950';
+                }
               }
             }
 
