@@ -78,16 +78,7 @@ export default function App() {
   const [userId] = useState(() => getOrCreateUserId());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [appwriteConnected, setAppwriteConnected] = useState<boolean>(() => isAppwriteConfigured());
-  const [showAppwriteModal, setShowAppwriteModal] = useState<boolean>(false);
   const skipNextSaveSyncRef = useRef<boolean>(false);
-
-  // Load Appwrite forms setup from local storage or environment
-  const [appwriteEndpoint, setAppwriteEndpoint] = useState(() => localStorage.getItem('appwrite_endpoint') || 'https://cloud.appwrite.io/v1');
-  const [appwriteProjectId, setAppwriteProjectId] = useState(() => localStorage.getItem('appwrite_project_id') || '');
-  const [appwriteDatabaseId, setAppwriteDatabaseId] = useState(() => localStorage.getItem('appwrite_database_id') || 'santuario_db');
-  const [appwriteProfileColl, setAppwriteProfileColl] = useState(() => localStorage.getItem('appwrite_profile_col') || 'santuario_perfil');
-  const [appwriteHabitsColl, setAppwriteHabitsColl] = useState(() => localStorage.getItem('appwrite_habits_col') || 'santuario_habitos');
-  const [appwriteHistoryColl, setAppwriteHistoryColl] = useState(() => localStorage.getItem('appwrite_history_col') || 'santuario_historico');
 
   // Trigger full sync load function
   const triggerAppwriteSync = (targetUserId: string = userId, quiet: boolean = false) => {
@@ -519,23 +510,23 @@ export default function App() {
           {/* Quick Profile stats */}
           <div className="flex items-center gap-2 sm:gap-4">            {/* Appwrite status indicator */}
             <button
-              onClick={() => setShowAppwriteModal(true)}
+              onClick={() => triggerAppwriteSync(userId, false)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
                 appwriteConnected
-                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
-                  : 'bg-slate-950 text-slate-400 border-slate-900 hover:text-slate-300'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
               }`}
-              title="Configurações e Sincronização Appwrite"
+              title={appwriteConnected ? "Sincronizado! Clique para recalibrar a nuvem." : "Erro de Conexão. Clique para tentar reconectar o Appwrite."}
             >
               {isSyncing ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
               ) : appwriteConnected ? (
-                <Cloud className="w-3.5 h-3.5 text-rose-400" />
+                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
-                <CloudOff className="w-3.5 h-3.5 text-slate-500" />
+                <CloudOff className="w-3.5 h-3.5 text-rose-500" />
               )}
               <span className="hidden sm:inline">
-                {isSyncing ? 'Sincronizando...' : appwriteConnected ? 'Appwrite Ativo' : 'Offline (Local)'}
+                {isSyncing ? 'Conectando...' : appwriteConnected ? 'Nuvem Ativa' : 'Nuvem Inativa'}
               </span>
             </button>
 
@@ -686,228 +677,6 @@ export default function App() {
               >
                 Seguir em Presença Plena
               </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Appwrite Dashboard Integration & Schema Instructions Modal */}
-      <AnimatePresence>
-        {showAppwriteModal && (
-          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.9, y: 20, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, y: 20, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-3xl max-w-2xl w-full my-8 space-y-6 shadow-2xl relative text-left"
-            >
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-rose-500/10 text-rose-450 rounded-xl border border-rose-500/20">
-                    <Cloud className="w-5 h-5 text-rose-450" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-black text-slate-100">Sincronização Cloud Appwrite</h3>
-                    <p className="text-xs text-slate-400">Armazene de forma segura toda sua jornada de hábitos e devocionais</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowAppwriteModal(false)}
-                  className="p-1 px-3 bg-slate-950 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-bold border border-slate-850 cursor-pointer"
-                >
-                  Fechar
-                </button>
-              </div>
-
-              {/* Status Section */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">Estado da Conexão</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${appwriteConnected ? 'bg-rose-500 animate-pulse' : 'bg-slate-600'}`} />
-                    <span className="text-sm font-extrabold text-slate-200">
-                      {appwriteConnected ? 'Conectado à Nuvem' : 'Armazenamento Local (Offline)'}
-                    </span>
-                  </div>
-                </div>
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">ID de Partição (USER_UID)</span>
-                  <p className="text-xs font-mono text-slate-300 select-all truncate">
-                    {userId}
-                  </p>
-                </div>
-              </div>
-
-              {/* Form de Configuração Manual */}
-              <div className="bg-slate-950 p-5 rounded-2xl border border-slate-850/60 space-y-4 text-left">
-                <h4 className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
-                  Configurar Chaves de Conexão do Appwrite
-                </h4>
-                <p className="text-[11px] text-slate-400">
-                  Preencha os dados do seu projeto do Appwrite Console abaixo. Eles são armazenados de forma segura localmente e ativam a sincronização retroativa na nuvem em tempo real.
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Appwrite Endpoint URL</label>
-                    <input
-                      type="text"
-                      value={appwriteEndpoint}
-                      onChange={(e) => setAppwriteEndpoint(e.target.value)}
-                      placeholder="https://cloud.appwrite.io/v1"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Project ID <span className="text-rose-400">*</span></label>
-                    <input
-                      type="text"
-                      value={appwriteProjectId}
-                      onChange={(e) => setAppwriteProjectId(e.target.value)}
-                      placeholder="Inserir ID do seu projeto Appwrite"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Database ID</label>
-                    <input
-                      type="text"
-                      value={appwriteDatabaseId}
-                      onChange={(e) => setAppwriteDatabaseId(e.target.value)}
-                      placeholder="santuario_db"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Perfil</label>
-                    <input
-                      type="text"
-                      value={appwriteProfileColl}
-                      onChange={(e) => setAppwriteProfileColl(e.target.value)}
-                      placeholder="santuario_perfil"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500/50"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Hábitos</label>
-                    <input
-                      type="text"
-                      value={appwriteHabitsColl}
-                      onChange={(e) => setAppwriteHabitsColl(e.target.value)}
-                      placeholder="santuario_habitos"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500/50"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Histórico</label>
-                    <input
-                      type="text"
-                      value={appwriteHistoryColl}
-                      onChange={(e) => setAppwriteHistoryColl(e.target.value)}
-                      placeholder="santuario_historico"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-rose-500/50"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    onClick={() => {
-                      if (!appwriteProjectId.trim()) {
-                        alert("Por favor, preencha o seu Project ID do Appwrite.");
-                        return;
-                      }
-                      localStorage.setItem('appwrite_endpoint', appwriteEndpoint);
-                      localStorage.setItem('appwrite_project_id', appwriteProjectId);
-                      localStorage.setItem('appwrite_database_id', appwriteDatabaseId);
-                      localStorage.setItem('appwrite_profile_col', appwriteProfileColl);
-                      localStorage.setItem('appwrite_habits_col', appwriteHabitsColl);
-                      localStorage.setItem('appwrite_history_col', appwriteHistoryColl);
-                      
-                      const active = isAppwriteConfigured();
-                      setAppwriteConnected(active);
-                      alert("Credenciais salvas com sucesso! Clique em 'Testar Conexão Cloud' abaixo para validar a comunicação.");
-                    }}
-                    className="px-4 py-1.5 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-400 font-bold text-xs rounded-xl transition-all cursor-pointer"
-                  >
-                    Salvar Credenciais
-                  </button>
-                </div>
-              </div>
-
-              {/* Description how to setup */}
-              <div className="space-y-4 text-xs text-slate-400 leading-relaxed">
-                <div className="space-y-1">
-                  <p className="font-bold text-slate-200">Alternativa: Configurar via Variáveis de Ambiente (.env)</p>
-                  <p>
-                    Se preferir, forneça estas chaves no seu ambiente de compilação ou console do projeto:
-                  </p>
-                </div>
-
-                <div className="bg-slate-950 rounded-xl p-3 border border-slate-850 font-mono text-[11px] text-amber-500 space-y-1">
-                  <div>VITE_APPWRITE_ENDPOINT="https://cloud.appwrite.io/v1"</div>
-                  <div>VITE_APPWRITE_PROJECT_ID="seu-project-id"</div>
-                  <div>VITE_APPWRITE_DATABASE_ID="santuario_db"</div>
-                </div>
-
-                <div className="space-y-2 border-t border-slate-800 pt-3">
-                  <p className="font-bold text-slate-200">Requisitos no Painel do Appwrite Console:</p>
-                  <ol className="list-decimal list-inside space-y-1.5 pl-1">
-                    <li>Crie um projeto Web e obtenha o ID do Projeto.</li>
-                    <li>No painel <strong>Databases</strong>, crie um banco de dados com ID <code className="bg-slate-950 px-1 py-0.5 rounded text-amber-500 font-mono">santuario_db</code> (ou o configurado acima).</li>
-                    <li>Crie as seguintes Coleções dentro desse banco de dados com seus respectivos IDs:
-                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5 text-[11px]">
-                        <li><code className="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400 font-mono">santuario_perfil</code></li>
-                        <li><code className="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400 font-mono">santuario_habitos</code></li>
-                        <li><code className="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400 font-mono">santuario_historico</code></li>
-                      </ul>
-                    </li>
-                    <li>Em <strong>Settings &gt; Permissions</strong> de cada uma das três coleções, adicione acesso para a Role <strong>"Any"</strong> com todas as permissões ligadas (<code className="text-slate-350">Create, Read, Update, Delete</code>) para permitir acesso correto do cliente.</li>
-                    <li>Na aba <strong>Attributes</strong> de cada coleção, adicione os atributos com tamanhos adequados:
-                      <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5 text-[11px]">
-                        <li><strong>santuario_perfil</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">name</code> (String, 255), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">level</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">xp</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">streak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">maxStreak</code> (Integer), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">lastActiveDate</code> (String, 30), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">notificationPreferences</code> (String, 1000)</li>
-                        <li><strong>santuario_habitos</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">habits_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100)</li>
-                        <li><strong>santuario_historico</strong>: <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">history_list</code> (String/Text, 15000), <code className="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">updated_at</code> (String, 100)</li>
-                      </ul>
-                    </li>
-                  </ol>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 border-t border-slate-800 pt-4">
-                <button
-                  onClick={() => {
-                    if (!appwriteProjectId.trim()) {
-                      alert("Por favor, preencha o seu Project ID do Appwrite.");
-                      return;
-                    }
-                    localStorage.setItem('appwrite_endpoint', appwriteEndpoint);
-                    localStorage.setItem('appwrite_project_id', appwriteProjectId);
-                    localStorage.setItem('appwrite_database_id', appwriteDatabaseId);
-                    localStorage.setItem('appwrite_profile_col', appwriteProfileColl);
-                    localStorage.setItem('appwrite_habits_col', appwriteHabitsColl);
-                    localStorage.setItem('appwrite_history_col', appwriteHistoryColl);
-
-                    triggerAppwriteSync(userId, false).then(success => {
-                      if (success) {
-                        setAppwriteConnected(true);
-                      } else {
-                        setAppwriteConnected(false);
-                      }
-                    });
-                  }}
-                  className="px-4 py-2 bg-slate-950 border border-slate-850 hover:bg-slate-900 transition-colors text-slate-200 font-semibold text-xs rounded-xl cursor-pointer"
-                >
-                  {isSyncing ? "Verificando..." : "Testar Conexão Cloud"}
-                </button>
-                <button
-                  onClick={() => setShowAppwriteModal(false)}
-                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 transition-colors text-slate-950 font-black text-xs rounded-xl uppercase tracking-wider cursor-pointer"
-                >
-                  Entendi, Prosseguir
-                </button>
-              </div>
             </motion.div>
           </div>
         )}

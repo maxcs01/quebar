@@ -14,7 +14,7 @@ export function getAppwriteConfig(): AppwriteKeys {
   const metaEnv = (import.meta as any).env || {};
   return {
     endpoint: localStorage.getItem('appwrite_endpoint') || metaEnv.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
-    projectId: localStorage.getItem('appwrite_project_id') || metaEnv.VITE_APPWRITE_PROJECT_ID || '',
+    projectId: localStorage.getItem('appwrite_project_id') || metaEnv.VITE_APPWRITE_PROJECT_ID || 'sfo-6a1984eb00307378c411',
     databaseId: localStorage.getItem('appwrite_database_id') || metaEnv.VITE_APPWRITE_DATABASE_ID || 'santuario_db',
     profileCollection: localStorage.getItem('appwrite_profile_col') || metaEnv.VITE_APPWRITE_PROFILE_COLLECTION_ID || 'santuario_perfil',
     habitsCollection: localStorage.getItem('appwrite_habits_col') || metaEnv.VITE_APPWRITE_HABITS_COLLECTION_ID || 'santuario_habitos',
