@@ -40,7 +40,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
   const [isMuted, setIsMuted] = useState<boolean>(false);
   
   // Moment Tag state
-  const [selectedTag, setSelectedTag] = useState<'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura'>('despertar');
+  const [selectedTag, setSelectedTag] = useState<'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura'>('aleatorio');
 
   // Guided breathing states
   const [breathPhase, setBreathPhase] = useState<'inhale' | 'hold' | 'exhale' | 'still'>('still');

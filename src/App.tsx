@@ -18,7 +18,9 @@ import {
   RefreshCw,
   Copy,
   Check,
-  ExternalLink
+  ExternalLink,
+  X,
+  Database
 } from 'lucide-react';
 
 import { Habit, DayProgress, UserProfile } from './types';
@@ -32,7 +34,8 @@ import {
   saveProfileToAppwrite,
   saveHabitsToAppwrite,
   saveHistoryToAppwrite,
-  loadUserDataFromAppwrite
+  loadUserDataFromAppwrite,
+  listAllProfilesFromAppwrite
 } from './lib/appwrite';
 
 // Localstorage keys
@@ -41,6 +44,15 @@ const HISTORY_STORAGE_KEY = 'santuario_historico';
 const PROFILE_STORAGE_KEY = 'santuario_perfil';
 
 // Format date to local YYYY-MM-DD
+// Parse YYYY-MM-DD date string safely without timezone offsets
+function parseLocalDate(dateStr: string): Date {
+  const parts = dateStr.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const d = parseInt(parts[2], 10);
+  return new Date(y, m, d);
+}
+
 function formatDate(date: Date): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -57,28 +69,70 @@ export default function App() {
     return formatDate(new Date());
   }, []);
 
-  // States
-  const [habits, setHabits] = useState<Habit[]>([]);
-  const [history, setHistory] = useState<DayProgress[]>([]);
-  const [profile, setProfile] = useState<UserProfile>({
-    name: '',
-    level: 1,
-    xp: 0,
-    streak: 0,
-    maxStreak: 0,
-    lastActiveDate: currentDateStr,
-    notificationPreferences: {
-      enabled: true,
-      morningTime: '07:00',
-      eveningTime: '21:00'
+  // States - Direct Synchronous initialization from localStorage for instant, flicker-free rendering
+  const [habits, setHabits] = useState<Habit[]>(() => {
+    const stored = localStorage.getItem(HABITS_STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
     }
+    return DEFAULT_HABITS;
+  });
+
+  const [history, setHistory] = useState<DayProgress[]>(() => {
+    const stored = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    const stored = localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.xp >= 0) return parsed;
+      } catch (e) {}
+    }
+    return {
+      name: 'Praticante Espiritual',
+      level: 1,
+      xp: 0,
+      streak: 0,
+      maxStreak: 0,
+      lastActiveDate: formatDate(new Date()),
+      notificationPreferences: {
+        enabled: true,
+        morningTime: '07:00',
+        eveningTime: '21:00'
+      }
+    };
   });
 
   // Appwrite Sync States
-  const [userId] = useState(() => getOrCreateUserId());
+  const [userId, setUserId] = useState<string>(() => getOrCreateUserId());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [appwriteConnected, setAppwriteConnected] = useState<boolean>(() => isAppwriteConfigured());
-  const skipNextSaveSyncRef = useRef<boolean>(false);
+  
+  // Backup / Sincronização Modal States
+  const [showBackupModal, setShowBackupModal] = useState<boolean>(false);
+  const [backupInputId, setBackupInputId] = useState<string>('');
+  const [copyFeedback, setCopyFeedback] = useState<boolean>(false);
+  const [backupStatusMessage, setBackupStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [availableProfiles, setAvailableProfiles] = useState<Array<{ userId: string; name: string; level: number; xp: number; streak: number; lastActiveDate: string }> | null>(null);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState<boolean>(false);
+
+  // Specific refs to skip save-back loops when loading values from the cloud
+  const skipHabitsSaveRef = useRef<boolean>(false);
+  const skipHistorySaveRef = useRef<boolean>(false);
+  const skipProfileSaveRef = useRef<boolean>(false);
+  const initialCloudSyncDoneRef = useRef<boolean>(false);
 
   // Trigger full sync load function
   const triggerAppwriteSync = (targetUserId: string = userId, quiet: boolean = true) => {
@@ -88,8 +142,11 @@ export default function App() {
     }
     setIsSyncing(true);
     return loadUserDataFromAppwrite(targetUserId).then(cloudData => {
-      skipNextSaveSyncRef.current = true;
       if (cloudData) {
+        skipHabitsSaveRef.current = true;
+        skipHistorySaveRef.current = true;
+        skipProfileSaveRef.current = true;
+
         if (cloudData.profile) {
           setProfile(cloudData.profile);
           localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
@@ -138,117 +195,183 @@ export default function App() {
 
   // 1. Initial State Loading from LocalStorage & Appwrite Cloud Backup Sync
   useEffect(() => {
-    // Phase A: Sync-load local values immediately for snappy initial response
-    const storedHabits = localStorage.getItem(HABITS_STORAGE_KEY);
-    const storedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
-    const storedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
-
-    let initialHabits = DEFAULT_HABITS;
-    let initialHistory: DayProgress[] = [];
-    let initialProfile: UserProfile = {
-      name: 'Praticante Espiritual',
-      level: 1,
-      xp: 0,
-      streak: 0,
-      maxStreak: 0,
-      lastActiveDate: currentDateStr,
-      notificationPreferences: {
-        enabled: true,
-        morningTime: '07:00',
-        eveningTime: '21:00'
-      }
-    };
-
-    if (storedHabits) {
-      try { initialHabits = JSON.parse(storedHabits); } catch(e) {}
-    }
-    if (storedHistory) {
-      try { initialHistory = JSON.parse(storedHistory); } catch(e) {}
-    }
-    if (storedProfile) {
-      try { initialProfile = JSON.parse(storedProfile); } catch(e) {}
-    }
-
-    setHabits(initialHabits);
-    setHistory(initialHistory);
-    setProfile(initialProfile);
-
     // Phase B: Fetch from Appwrite in background to load remote database matches
     if (isAppwriteConfigured()) {
       setIsSyncing(true);
       loadUserDataFromAppwrite(userId).then(cloudData => {
         if (cloudData) {
-          skipNextSaveSyncRef.current = true; // prevent reflection loop during load values trigger
+          skipHabitsSaveRef.current = true;
+          skipHistorySaveRef.current = true;
+          skipProfileSaveRef.current = true;
 
           if (cloudData.profile) {
             setProfile(cloudData.profile);
             localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
           } else {
-            saveProfileToAppwrite(userId, initialProfile);
+            saveProfileToAppwrite(userId, profile);
           }
 
           if (cloudData.habits) {
             setHabits(cloudData.habits);
             localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
           } else {
-            saveHabitsToAppwrite(userId, initialHabits);
+            saveHabitsToAppwrite(userId, habits);
           }
 
           if (cloudData.history) {
             setHistory(cloudData.history);
             localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
           } else {
-            saveHistoryToAppwrite(userId, initialHistory);
+            saveHistoryToAppwrite(userId, history);
           }
 
           setAppwriteConnected(true);
         } else {
           // Empty or new remote profile -> automatically push our data to cloud on start
-          saveProfileToAppwrite(userId, initialProfile);
-          saveHabitsToAppwrite(userId, initialHabits);
-          saveHistoryToAppwrite(userId, initialHistory);
+          saveProfileToAppwrite(userId, profile);
+          saveHabitsToAppwrite(userId, habits);
+          saveHistoryToAppwrite(userId, history);
           setAppwriteConnected(true);
         }
-        setIsSyncing(false);
       }).catch(err => {
         console.warn('Appwrite cloud synchronization missed or offline:', err);
         setAppwriteConnected(false); // Display red cloud when offline or network fails
+      }).finally(() => {
         setIsSyncing(false);
+        initialCloudSyncDoneRef.current = true; // Mark initialization completed!
       });
+    } else {
+      // If Appwrite is not configured, we are fully initialized locally
+      initialCloudSyncDoneRef.current = true;
     }
   }, [userId]);
 
   // 2. Persistent saving engine triggers whenever local React state updates
   useEffect(() => {
-    if (habits.length > 0) {
-      localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(habits));
-      if (appwriteConnected && isAppwriteConfigured() && !skipNextSaveSyncRef.current) {
-        saveHabitsToAppwrite(userId, habits);
-      }
+    localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(habits));
+    if (skipHabitsSaveRef.current) {
+      skipHabitsSaveRef.current = false;
+      return;
+    }
+    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured()) {
+      saveHabitsToAppwrite(userId, habits);
     }
   }, [habits, userId, appwriteConnected]);
 
   useEffect(() => {
-    if (history.length >= 0) {
-      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
-      if (appwriteConnected && isAppwriteConfigured() && !skipNextSaveSyncRef.current) {
-        saveHistoryToAppwrite(userId, history);
-      }
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
+    if (skipHistorySaveRef.current) {
+      skipHistorySaveRef.current = false;
+      return;
+    }
+    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured()) {
+      saveHistoryToAppwrite(userId, history);
     }
   }, [history, userId, appwriteConnected]);
 
   useEffect(() => {
-    if (profile.xp >= 0) {
-      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-      if (appwriteConnected && isAppwriteConfigured() && !skipNextSaveSyncRef.current) {
-        saveProfileToAppwrite(userId, profile);
-      }
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    if (skipProfileSaveRef.current) {
+      skipProfileSaveRef.current = false;
+      return;
     }
-    // Release lock if it was active
-    if (skipNextSaveSyncRef.current) {
-      setTimeout(() => { skipNextSaveSyncRef.current = false; }, 500);
+    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured()) {
+      saveProfileToAppwrite(userId, profile);
     }
   }, [profile, userId, appwriteConnected]);
+
+  // 3. Recalculate streak values dynamically from history completions database whenever it updates
+  useEffect(() => {
+    const streakResult = runStreakUpdate(history, currentDateStr);
+    setProfile(prev => {
+      if (prev.streak !== streakResult.streak || prev.maxStreak !== streakResult.max) {
+        return {
+          ...prev,
+          streak: streakResult.streak,
+          maxStreak: streakResult.max
+        };
+      }
+      return prev;
+    });
+  }, [history, currentDateStr]);
+
+  // Import past cloud backup data using custom Backup/Synchronization ID
+  const handleImportBackupId = (targetId: string) => {
+    const cleanId = targetId.trim();
+    if (!cleanId) {
+      setBackupStatusMessage({ text: 'Por favor, informe um código de sincronização válido.', type: 'error' });
+      return;
+    }
+    
+    setIsSyncing(true);
+    setBackupStatusMessage({ text: 'Buscando dados espirituais na nuvem...', type: 'info' });
+    
+    loadUserDataFromAppwrite(cleanId).then(cloudData => {
+      if (cloudData) {
+        // Marcamos as salvaguardas para não sobrescrever a nuvem com dados em branco locais no meio do set
+        skipHabitsSaveRef.current = true;
+        skipHistorySaveRef.current = true;
+        skipProfileSaveRef.current = true;
+        
+        // Atualiza a chave local e o estado de ID global
+        localStorage.setItem('santuario_uid', cleanId);
+        setUserId(cleanId);
+        
+        if (cloudData.profile) {
+          setProfile(cloudData.profile);
+          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
+        }
+        if (cloudData.habits) {
+          setHabits(cloudData.habits);
+          localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
+        }
+        if (cloudData.history) {
+          setHistory(cloudData.history);
+          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
+        }
+        
+        setAppwriteConnected(true);
+        setBackupStatusMessage({ text: 'Santuário sintonizado! Seus dados e seu histórico anterior foram carregados com sucesso!', type: 'success' });
+      } else {
+        // Registro de ID inexistente mas válido para sessões futuras
+        localStorage.setItem('santuario_uid', cleanId);
+        setUserId(cleanId);
+        
+        saveProfileToAppwrite(cleanId, profile);
+        saveHabitsToAppwrite(cleanId, habits);
+        saveHistoryToAppwrite(cleanId, history);
+        
+        setAppwriteConnected(true);
+        setBackupStatusMessage({ text: 'Nenhum dado encontrado para esse código. Um novo templo de orações foi criado na nuvem com este código!', type: 'success' });
+      }
+    }).catch(err => {
+      console.warn('Appwrite sync import failed:', err);
+      setBackupStatusMessage({ text: `Ops, erro ao resgatar histórico: ${err.message || 'Verifique seus dados de rede.'}`, type: 'error' });
+    }).finally(() => {
+      setIsSyncing(false);
+    });
+  };
+
+  const fetchAvailableProfiles = () => {
+    if (!isAppwriteConfigured()) return;
+    setIsLoadingProfiles(true);
+    listAllProfilesFromAppwrite()
+      .then(profiles => {
+        setAvailableProfiles(profiles);
+      })
+      .catch(err => {
+        console.warn('Erro ao carregar perfis do Appwrite:', err);
+      })
+      .finally(() => {
+        setIsLoadingProfiles(false);
+      });
+  };
+
+  useEffect(() => {
+    if (showBackupModal) {
+      fetchAvailableProfiles();
+    }
+  }, [showBackupModal]);
 
   // Level Up logic validator: Analyzes XP modifications and transitions levels
   const checkLevelUp = (currentXP: number, previousLevel: number) => {
@@ -286,16 +409,24 @@ export default function App() {
   const runStreakUpdate = (currentHis: DayProgress[], currentDate: string) => {
     if (currentHis.length === 0) return { streak: 0, max: profile.maxStreak };
 
-    // Get unique list of days with completed habits sorted descending
-    const activeDays = currentHis
-      .filter(day => day.habitsCompleted && day.habitsCompleted.length > 0)
-      .map(day => day.date)
-      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    // Get unique list of days with completed habits, meditation, or journal reflections sorted descending
+    const activeDays = Array.from(
+      new Set(
+        currentHis
+          .filter(day => {
+            const hasHabits = day.habitsCompleted && day.habitsCompleted.length > 0;
+            const hasMeditation = day.meditationSeconds && day.meditationSeconds > 0;
+            const hasReflection = day.reflection && day.reflection.trim().length > 0;
+            return hasHabits || hasMeditation || hasReflection;
+          })
+          .map(day => day.date)
+      )
+    ).sort((a, b) => parseLocalDate(b).getTime() - parseLocalDate(a).getTime());
     
     if (activeDays.length === 0) return { streak: 0, max: profile.maxStreak };
 
-    const todayDate = new Date(currentDate);
-    const yesterdayDate = new Date(currentDate);
+    const todayDate = parseLocalDate(currentDate);
+    const yesterdayDate = parseLocalDate(currentDate);
     yesterdayDate.setDate(todayDate.getDate() - 1);
     
     const todayStr = currentDate;
@@ -309,14 +440,15 @@ export default function App() {
 
     // Loop through sorted days to find continuous streak count
     let currentStreak = 1;
-    let checker = new Date(lastActive);
+    let checker = parseLocalDate(lastActive);
+    const activeDaysSet = new Set(activeDays);
 
-    for (let i = 1; i < activeDays.length; i++) {
-      // Subtract 1 day from checker
+    while (true) {
+      // Subtract 1 day from checker safely in local time
       checker.setDate(checker.getDate() - 1);
       const checkerStr = formatDate(checker);
       
-      if (activeDays.includes(checkerStr)) {
+      if (activeDaysSet.has(checkerStr)) {
         currentStreak++;
       } else {
         break;
@@ -376,13 +508,8 @@ export default function App() {
       addXP(xpDiff);
     }
 
-    // Refresh streak values recursively
-    const streakResult = runStreakUpdate(updatedHistory, currentDateStr);
-
     setProfile(prev => ({
       ...prev,
-      streak: streakResult.streak,
-      maxStreak: streakResult.max,
       lastActiveDate: currentDateStr
     }));
   };
@@ -435,6 +562,10 @@ export default function App() {
     setHistory(updatedHistory);
     // Add 10 XP for writing in the devotional journal!
     addXP(10);
+    setProfile(prev => ({
+      ...prev,
+      lastActiveDate: currentDateStr
+    }));
   };
 
   // Concluding a meditation countdown timer
@@ -472,26 +603,10 @@ export default function App() {
     const xpReward = minutesCompleted * 10;
     addXP(xpReward);
 
-    // Refresh streak
-    const streakResult = runStreakUpdate(updatedHistory, currentDateStr);
     setProfile(prev => ({
       ...prev,
-      streak: streakResult.streak,
-      maxStreak: streakResult.max,
       lastActiveDate: currentDateStr
     }));
-  };
-
-  // Allowing simple manual name change
-  const handleProfileNameChange = (e: React.FormEvent) => {
-    e.preventDefault();
-    const promptName = window.prompt("Como deseja ser chamado em sua caminhada?", profile.name);
-    if (promptName && promptName.trim()) {
-      setProfile(prev => ({
-        ...prev,
-        name: promptName.trim()
-      }));
-    }
   };
 
   return (
@@ -515,13 +630,17 @@ export default function App() {
           {/* Quick Profile stats */}
           <div className="flex items-center gap-2 sm:gap-4">            {/* Appwrite status indicator */}
             <button
-              onClick={() => triggerAppwriteSync(userId, true)}
+              onClick={() => {
+                setBackupInputId('');
+                setBackupStatusMessage(null);
+                setShowBackupModal(true);
+              }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
                 appwriteConnected
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
                   : 'bg-rose-500/10 text-rose-500 border-rose-500/20 hover:bg-rose-500/20'
               }`}
-              title={appwriteConnected ? "Dados Sincronizados na Nuvem" : "Erro de Sincronização. Clique para reconectar."}
+              title="Gerenciar Sincronização na Nuvem"
             >
               {isSyncing ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
@@ -537,7 +656,11 @@ export default function App() {
 
             <button 
               id="btn-profile"
-              onClick={handleProfileNameChange}
+              onClick={() => {
+                setBackupInputId('');
+                setBackupStatusMessage(null);
+                setShowBackupModal(true);
+              }}
               className="flex items-center gap-2 bg-slate-950 hover:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-900 transition-colors cursor-pointer text-left"
             >
               <div className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
@@ -681,6 +804,198 @@ export default function App() {
                 className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md uppercase tracking-wider transition-colors active:scale-97 cursor-pointer"
               >
                 Seguir em Presença Plena
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Painel de Perfil e Sincronização na Nuvem em Modal */}
+      <AnimatePresence>
+        {showBackupModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, y: 20, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 p-6 rounded-3xl max-w-md w-full space-y-5 shadow-2xl relative text-left"
+            >
+              {/* Botão Fechar no canto */}
+              <button
+                id="btn-close-backup-modal"
+                onClick={() => setShowBackupModal(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-lg bg-slate-950 hover:bg-slate-850 text-slate-500 hover:text-slate-200 border border-slate-850 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-800/65">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center justify-center">
+                  <Database className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Painel de Perfil &amp; Backup</h3>
+                  <p className="text-[9px] text-slate-500 font-mono">Gerencie suas preces e integridade dos dados</p>
+                </div>
+              </div>
+
+              {/* Seção 1: Identidade */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 block">Seu Nome Espiritual</label>
+                <input
+                  type="text"
+                  value={profile.name}
+                  onChange={(e) => {
+                    setProfile(prev => ({ ...prev, name: e.target.value }));
+                  }}
+                  placeholder="Seu nome"
+                  className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30 transition-colors font-sans"
+                />
+              </div>
+
+              {/* Seção 2: Código de Sincronização Atual */}
+              <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-850/60 space-y-2">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                    <Cloud className="w-3.5 h-3.5 text-indigo-400 fill-indigo-400/10" />
+                    Seu Código de Sincronização
+                  </span>
+                  <p className="text-[10px] text-slate-500 leading-tight mt-1 font-sans">
+                    Guarde este código para resgatar suas preces e progresso se limpar o histórico do navegador ou se mudar de dispositivo.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={userId}
+                    className="flex-1 bg-slate-950/90 border border-slate-850 rounded-xl px-3 py-2 text-xs text-slate-400 font-mono text-center select-all focus:outline-none"
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(userId);
+                      setCopyFeedback(true);
+                      setTimeout(() => setCopyFeedback(false), 2000);
+                    }}
+                    className="px-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {copyFeedback ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copyFeedback ? 'Copiado' : 'Copiar'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Seção 3: Importar Dados Anteriores / Resgatar */}
+              <div className="space-y-2 pt-1 font-sans">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-slate-500 block">Recuperar Orações Anteriores</label>
+                  <p className="text-[9px] text-slate-500 mt-0.5 leading-tight">
+                    Cole o código de sincronização que usou no outro dia para carregar todo o seu histórico no Appwrite.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={backupInputId}
+                    onChange={(e) => setBackupInputId(e.target.value)}
+                    placeholder="Ex: usr12abc..."
+                    className="flex-1 bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-slate-200 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30 font-mono transition-colors"
+                  />
+                  <button
+                    onClick={() => handleImportBackupId(backupInputId)}
+                    disabled={isSyncing}
+                    className="px-4.5 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 font-black text-xs rounded-xl hover:shadow-md transition-colors cursor-pointer active:scale-97 flex items-center gap-1.5 justify-center"
+                  >
+                    {isSyncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Resgatar'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Seção 4: Contas Encontradas no Servidor para Resgate Fácil */}
+              <div className="space-y-2 pt-2.5 font-sans border-t border-slate-800/50">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] uppercase font-bold text-slate-500 block">
+                    Templos de Orações na Nuvem
+                  </label>
+                  <button 
+                    onClick={fetchAvailableProfiles}
+                    disabled={isLoadingProfiles}
+                    className="text-[10px] text-amber-500 hover:underline font-bold bg-transparent border-0 cursor-pointer flex items-center gap-1"
+                  >
+                    <RefreshCw className={`w-2.5 h-2.5 ${isLoadingProfiles ? 'animate-spin' : ''}`} />
+                    Atualizar
+                  </button>
+                </div>
+                
+                {isLoadingProfiles ? (
+                  <div className="text-center py-3">
+                    <RefreshCw className="w-4 h-4 animate-spin mx-auto text-amber-500/40" />
+                    <p className="text-[9px] text-slate-500 mt-1">Lendo do Appwrite...</p>
+                  </div>
+                ) : availableProfiles && availableProfiles.length > 0 ? (
+                  <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                    {availableProfiles.map((p) => {
+                      const isCurrent = p.userId === userId;
+                      return (
+                        <div 
+                          key={p.userId} 
+                          className={`p-2 rounded-xl text-left flex justify-between items-center text-xs transition-all border ${
+                            isCurrent 
+                              ? 'bg-amber-500/5 border-amber-500/20' 
+                              : 'bg-slate-950 border border-slate-850 hover:border-slate-800'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 pr-1.5">
+                            <span className="font-bold text-slate-200 block truncate leading-tight">
+                              {p.name || 'Praticante Anônimo'} {isCurrent && <span className="text-[9px] text-amber-500 font-normal">(Atual)</span>}
+                            </span>
+                            <span className="text-[9px] text-slate-500 font-mono block">
+                              Ofensiva: {p.streak} d • Nvl {p.level} • XP: {p.xp}
+                            </span>
+                          </div>
+                          {!isCurrent && (
+                            <button
+                              onClick={() => {
+                                handleImportBackupId(p.userId);
+                              }}
+                              className="px-2.5 py-1 bg-amber-500 text-slate-950 text-[10px] font-black rounded-lg hover:bg-amber-400 cursor-pointer text-center whitespace-nowrap active:scale-95 transition-transform"
+                            >
+                              Sintonizar
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[9px] text-slate-500 italic text-center py-2 bg-slate-950/45 rounded-lg border border-slate-850/30">
+                    Nenhum outro templo de preces encontrado na nuvem para este projeto.
+                  </p>
+                )}
+              </div>
+
+              {/* Mensagem de Feedback de Backup */}
+              {backupStatusMessage && (
+                <div className={`p-3 rounded-xl border text-[11px] font-medium leading-relaxed font-sans ${
+                  backupStatusMessage.type === 'success' 
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                    : backupStatusMessage.type === 'error' 
+                      ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' 
+                      : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300'
+                }`}>
+                  {backupStatusMessage.text}
+                </div>
+              )}
+
+              {/* Botão de Rodapé */}
+              <button
+                id="btn-close-backup-footer"
+                onClick={() => setShowBackupModal(false)}
+                className="w-full py-2.5 bg-slate-950 hover:bg-slate-900 text-slate-200 border border-slate-850 hover:text-slate-100 font-bold text-xs rounded-xl transition-all cursor-pointer text-center"
+              >
+                Concluir &amp; Voltar ao Santuário
               </button>
             </motion.div>
           </div>

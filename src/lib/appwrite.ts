@@ -214,3 +214,23 @@ export async function loadUserDataFromAppwrite(userId: string): Promise<{
     return null;
   }
 }
+
+export async function listAllProfilesFromAppwrite(): Promise<Array<{ userId: string; name: string; level: number; xp: number; streak: number; lastActiveDate: string }> | null> {
+  const instance = getDatabasesInstance();
+  if (!instance) return null;
+  const { db, config } = instance;
+  try {
+    const list = await db.listDocuments(config.databaseId, config.profileCollection);
+    return list.documents.map((doc: any) => ({
+      userId: doc.$id,
+      name: doc.name || 'Praticante Anônimo',
+      level: doc.level || 1,
+      xp: doc.xp || 0,
+      streak: doc.streak || 0,
+      lastActiveDate: doc.lastActiveDate || ''
+    }));
+  } catch (err) {
+    console.warn('Failed to list Appwrite profiles:', err);
+    return null;
+  }
+}
