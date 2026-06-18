@@ -16,7 +16,10 @@ import {
   Sliders,
   Compass,
   CheckCircle,
-  BookOpen
+  BookOpen,
+  Bell,
+  Flame,
+  ShieldAlert
 } from 'lucide-react';
 import { TimerPreset } from '../types';
 import { TIMER_PRESETS } from '../data/defaultData';
@@ -140,6 +143,43 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
   const [isSoundLooping, setIsSoundLooping] = useState<boolean>(false);
   const soundIntervalRef = useRef<number | null>(null);
 
+  // Screen Wake Lock API reference to prevent screen turn-off during prayer/meditation
+  const wakeLockRef = useRef<any>(null);
+
+  const requestWakeLock = async () => {
+    if (!('wakeLock' in navigator)) {
+      console.warn('Wake Lock is not supported on this platform/browser.');
+      return;
+    }
+    try {
+      if (wakeLockRef.current) return;
+      wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      console.log('Screen Wake Lock active! Screen won\'t dim or turn off.');
+    } catch (err) {
+      console.warn('Failed to secure Screen Wake Lock:', err);
+    }
+  };
+
+  const releaseWakeLock = () => {
+    if (wakeLockRef.current) {
+      try {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log('Screen Wake Lock released.');
+      } catch (err) {
+        console.warn('Error releasing Screen Wake Lock:', err);
+      }
+    }
+  };
+
+  const requestNotificationPermission = () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        console.log('Notification permission query decision:', permission);
+      });
+    }
+  };
+
   const stopLoopingSound = () => {
     setIsSoundLooping(false);
     if (soundIntervalRef.current) {
@@ -174,6 +214,31 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
     if (!isPlaying) {
       endTimeRef.current = null;
     }
+  }, [isPlaying]);
+
+  // Manage Screen Wake Lock during active sessions so screen doesn't turn off
+  useEffect(() => {
+    if (isPlaying) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isPlaying]);
+
+  // Re-acquire Wake Lock when tab becomes active/visible again
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isPlaying) {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [isPlaying]);
 
   // Handle background / closed-app completion on mount
@@ -343,6 +408,36 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
             setFinishedDuration(duration);
             setShowCompleteModal(true);
             onCompleteMeditation(duration, selectedTag);
+
+            // Trigger browser system notification if permissions granted
+            if ('Notification' in window && Notification.permission === 'granted') {
+              try {
+                const categoryLabel = tagsList.find(t => t.id === selectedTag)?.label || 'Meditação';
+                const categoryEmoji = tagsList.find(t => t.id === selectedTag)?.emoji || '🙏';
+                const notification = new Notification(`${categoryEmoji} Tempo Concluído - QUEBAR`, {
+                  body: `Sua vigília de ${categoryLabel} estipulada em ${Math.round(duration / 60)} minutos terminou com glória!`,
+                  icon: '/logoo.png',
+                  vibrate: [200, 100, 200, 100, 200],
+                  tag: 'quebar-timer-complete',
+                  requireInteraction: true
+                } as any);
+                notification.onclick = () => {
+                  window.focus();
+                  notification.close();
+                };
+              } catch (e) {
+                console.warn('Could not display system alert notification:', e);
+              }
+            }
+
+            // Vibrate device if API is supported
+            if ('vibrate' in navigator) {
+              try {
+                navigator.vibrate([400, 200, 400, 200, 400]);
+              } catch (e) {
+                console.log('Vibrate is not permitted in this specific browser shell.');
+              }
+            }
             
             // Loop sound alert continuously until explicitly canceled
             if (soundSelection !== 'none') {
@@ -753,6 +848,7 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
                 setIsPlaying(nextPlaying);
                 if (nextPlaying) {
                   setHasStarted(true);
+                  requestNotificationPermission();
                 }
               }}
               className={`p-5 rounded-2xl flex items-center justify-center shadow-lg transition-all transform active:scale-95 cursor-pointer ${
@@ -885,6 +981,59 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
               <Volume2 className="w-3.5 h-3.5" />
               Testar Timbre de Sino
             </button>
+          </div>
+
+          {/* Background persistence settings card */}
+          <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl space-y-3.5">
+            <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-amber-500" />
+              Prevenção de Suspensão / Avisos
+            </h3>
+            
+            <div className="space-y-2.5 text-xs">
+              <div className="flex items-start gap-2.5 p-2.5 bg-slate-950/60 rounded-2xl border border-slate-850">
+                <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-400 mt-0.5">
+                  <Flame className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <span className="font-bold text-slate-200 block text-[11px] uppercase tracking-wide">Tela Sempre Ativa (Wake-Lock)</span>
+                  <span className="text-[10px] text-slate-400 leading-snug">
+                    O aplicativo ativa automaticamente o Wake Lock para manter a tela ligada e evitar que o cronômetro pause ao apagar a tela.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5 p-2.5 bg-slate-950/60 rounded-2xl border border-slate-850">
+                <div className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-400 mt-0.5">
+                  <Bell className="w-3.5 h-3.5" />
+                </div>
+                <div className="flex-1">
+                  <span className="font-bold text-slate-200 block text-[11px] uppercase tracking-wide">Notificações em Segundo Plano</span>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Se você minimizar o app ou bloquear a tela, receberá um alerta visual e sonoro nativo do celular quando o tempo acabar.
+                  </p>
+                  <button
+                    id="btn-permit-notify"
+                    onClick={() => {
+                      if ('Notification' in window) {
+                        Notification.requestPermission().then(permission => {
+                          if (permission === 'granted') {
+                            alert('Permissão concedida! Suas notificações de término de tempo estão ativas.');
+                          } else {
+                            alert('Permissão de notificações: ' + permission);
+                          }
+                        });
+                      } else {
+                        alert('Seu navegador não oferece suporte nativo a notificações.');
+                      }
+                    }}
+                    className="mt-1.5 text-[9px] font-extrabold text-indigo-400 hover:text-indigo-300 uppercase tracking-widest cursor-pointer"
+                  >
+                    Ativar/Verificar Permissão manual
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
         </div>
