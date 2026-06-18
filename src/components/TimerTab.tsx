@@ -27,20 +27,96 @@ interface TimerTabProps {
   userIdName?: string;
 }
 
+const getSavedTimerState = () => {
+  const saved = localStorage.getItem('santuario_timer_state');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.hasStarted) {
+        return parsed;
+      }
+    } catch (err) {
+      console.warn("Error parsing saved timer state:", err);
+    }
+  }
+  return null;
+};
+
 export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabProps) {
+  // Retrieve saved active/paused timer state on startup
+  const initialSavedState = getSavedTimerState();
+
   // Configurable states
-  const [duration, setDuration] = useState<number>(600); // 10 minutes default (600s)
-  const [customHours, setCustomHours] = useState<number>(0);
-  const [customMinutes, setCustomMinutes] = useState<number>(10);
-  const [customSeconds, setCustomSeconds] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [hasStarted, setHasStarted] = useState<boolean>(false);
-  const [timeLeft, setTimeLeft] = useState<number>(600);
-  const [soundSelection, setSoundSelection] = useState<'gong' | 'bell' | 'bowl' | 'none'>('gong');
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [duration, setDuration] = useState<number>(() => {
+    if (initialSavedState) return initialSavedState.duration;
+    return 600; // 10 minutes default (600s)
+  });
+
+  const [customHours, setCustomHours] = useState<number>(() => {
+    const dur = initialSavedState ? initialSavedState.duration : 600;
+    return Math.floor(dur / 3600);
+  });
+
+  const [customMinutes, setCustomMinutes] = useState<number>(() => {
+    const dur = initialSavedState ? initialSavedState.duration : 600;
+    return Math.floor((dur % 3600) / 60);
+  });
+
+  const [customSeconds, setCustomSeconds] = useState<number>(() => {
+    const dur = initialSavedState ? initialSavedState.duration : 600;
+    return dur % 60;
+  });
+
+  const [isPlaying, setIsPlaying] = useState<boolean>(() => {
+    if (initialSavedState) {
+      if (initialSavedState.isPlaying && initialSavedState.targetEndTime) {
+        const now = Date.now();
+        const calculatedTimeLeft = Math.max(0, Math.ceil((initialSavedState.targetEndTime - now) / 1000));
+        return calculatedTimeLeft > 0;
+      }
+      return false; // if it wasn't playing or already expired
+    }
+    return false;
+  });
+
+  const [hasStarted, setHasStarted] = useState<boolean>(() => {
+    if (initialSavedState) {
+      if (initialSavedState.isPlaying && initialSavedState.targetEndTime) {
+        const now = Date.now();
+        const calculatedTimeLeft = Math.max(0, Math.ceil((initialSavedState.targetEndTime - now) / 1000));
+        return calculatedTimeLeft > 0;
+      }
+      return initialSavedState.timeLeft > 0;
+    }
+    return false;
+  });
+
+  const [timeLeft, setTimeLeft] = useState<number>(() => {
+    if (initialSavedState) {
+      if (initialSavedState.isPlaying && initialSavedState.targetEndTime) {
+        const now = Date.now();
+        return Math.max(0, Math.ceil((initialSavedState.targetEndTime - now) / 1000));
+      }
+      return initialSavedState.timeLeft;
+    }
+    return 600;
+  });
+
+  const [soundSelection, setSoundSelection] = useState<'gong' | 'bell' | 'bowl' | 'none'>(() => {
+    if (initialSavedState) return initialSavedState.soundSelection;
+    return 'gong';
+  });
+
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    if (initialSavedState) return initialSavedState.isMuted;
+    return false;
+  });
   
   // Moment Tag state
-  const [selectedTag, setSelectedTag] = useState<'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura'>('aleatorio');
+  const [selectedTag, setSelectedTag] = useState<'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura'>(() => {
+    if (initialSavedState) return initialSavedState.selectedTag;
+    return 'aleatorio';
+  });
 
   // Guided breathing states
   const [breathPhase, setBreathPhase] = useState<'inhale' | 'hold' | 'exhale' | 'still'>('still');
@@ -99,6 +175,41 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
       endTimeRef.current = null;
     }
   }, [isPlaying]);
+
+  // Handle background / closed-app completion on mount
+  useEffect(() => {
+    if (initialSavedState) {
+      if (initialSavedState.isPlaying && initialSavedState.targetEndTime) {
+        const now = Date.now();
+        const calculatedTimeLeft = Math.max(0, Math.ceil((initialSavedState.targetEndTime - now) / 1000));
+        
+        if (calculatedTimeLeft <= 0) {
+          // Completed while the app was closed/offline!
+          setFinishedDuration(initialSavedState.duration);
+          setShowCompleteModal(true);
+          onCompleteMeditation(initialSavedState.duration, initialSavedState.selectedTag);
+          
+          // Loop sound alert continuously until explicitly canceled
+          if (initialSavedState.soundSelection !== 'none' && !initialSavedState.isMuted) {
+            setIsSoundLooping(true);
+            setTimeout(() => {
+              playSynthesizedSound(initialSavedState.soundSelection);
+            }, 500);
+            if (soundIntervalRef.current) window.clearInterval(soundIntervalRef.current);
+            soundIntervalRef.current = window.setInterval(() => {
+              playSynthesizedSound(initialSavedState.soundSelection);
+            }, 2000);
+          }
+          
+          // Clear saved state
+          localStorage.removeItem('santuario_timer_state');
+        } else {
+          // Restoring in-progress run. Assign the endTimeRef!
+          endTimeRef.current = initialSavedState.targetEndTime;
+        }
+      }
+    }
+  }, []);
 
   // Sync scroll locations for Hours, Minutes, and Seconds wheels
   useEffect(() => {
@@ -259,6 +370,25 @@ export default function TimerTab({ onCompleteMeditation, userIdName }: TimerTabP
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, [isPlaying, duration, soundSelection, onCompleteMeditation, selectedTag, timeLeft]);
+
+  // Synchronize active background timer state to localStorage whenever state changes
+  useEffect(() => {
+    if (hasStarted) {
+      const state = {
+        isPlaying,
+        hasStarted,
+        timeLeft,
+        duration,
+        selectedTag,
+        soundSelection,
+        isMuted,
+        targetEndTime: endTimeRef.current
+      };
+      localStorage.setItem('santuario_timer_state', JSON.stringify(state));
+    } else {
+      localStorage.removeItem('santuario_timer_state');
+    }
+  }, [isPlaying, hasStarted, timeLeft, duration, selectedTag, soundSelection, isMuted]);
 
   // Handle setting preset values
   const handlePresetSelect = (minutesVal: number) => {

@@ -14,7 +14,7 @@ export function getAppwriteConfig(): AppwriteKeys {
   const metaEnv = (import.meta as any).env || {};
   return {
     endpoint: localStorage.getItem('appwrite_endpoint') || metaEnv.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
-    projectId: localStorage.getItem('appwrite_project_id') || metaEnv.VITE_APPWRITE_PROJECT_ID || 'sfo-6a1984eb00307378c411',
+    projectId: localStorage.getItem('appwrite_project_id') || metaEnv.VITE_APPWRITE_PROJECT_ID || '6a1984eb00307378c411',
     databaseId: localStorage.getItem('appwrite_database_id') || metaEnv.VITE_APPWRITE_DATABASE_ID || 'santuario_db',
     profileCollection: localStorage.getItem('appwrite_profile_col') || metaEnv.VITE_APPWRITE_PROFILE_COLLECTION_ID || 'santuario_perfil',
     habitsCollection: localStorage.getItem('appwrite_habits_col') || metaEnv.VITE_APPWRITE_HABITS_COLLECTION_ID || 'santuario_habitos',
@@ -63,6 +63,19 @@ export function getOrCreateUserId(): string {
   return uid;
 }
 
+export function enrichError(error: any): any {
+  if (!error) return error;
+  const msg = error.message || String(error);
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch') || msg.includes('Network Error')) {
+    const customMessage = "Falha de Rede / CORS: Não foi possível conectar ao servidor Appwrite. Se você estiver usando um projeto próprio, registre a URL atual (ou '*') em 'Web Platforms' no console do Appwrite. Se estiver usando o padrão, verifique sua rede ou desative Ad-blockers / Brave Shields.";
+    const newError = new Error(customMessage);
+    (newError as any).originalMessage = msg;
+    (newError as any).code = 'CORS_OR_NETWORK';
+    return newError;
+  }
+  return error;
+}
+
 // 1. Sync structures to Cloud using update/create upsert protocol
 export async function saveProfileToAppwrite(userId: string, profile: UserProfile) {
   const instance = getDatabasesInstance();
@@ -87,9 +100,12 @@ export async function saveProfileToAppwrite(userId: string, profile: UserProfile
         await db.createDocument(config.databaseId, config.profileCollection, userId, data);
       } catch (createErr: any) {
         console.warn('Appwrite createDocument profile failed:', createErr.message);
+        throw createErr;
       }
     } else {
-      console.warn('Error saving profile in Appwrite:', error.message);
+      const enriched = enrichError(error);
+      console.warn('Error saving profile in Appwrite:', enriched.message);
+      throw enriched;
     }
   }
 }
@@ -111,9 +127,12 @@ export async function saveHabitsToAppwrite(userId: string, habits: Habit[]) {
         await db.createDocument(config.databaseId, config.habitsCollection, userId, data);
       } catch (createErr: any) {
         console.warn('Appwrite createDocument habits failed:', createErr.message);
+        throw createErr;
       }
     } else {
-      console.warn('Error saving habits in Appwrite:', error.message);
+      const enriched = enrichError(error);
+      console.warn('Error saving habits in Appwrite:', enriched.message);
+      throw enriched;
     }
   }
 }
@@ -135,9 +154,12 @@ export async function saveHistoryToAppwrite(userId: string, history: DayProgress
         await db.createDocument(config.databaseId, config.historyCollection, userId, data);
       } catch (createErr: any) {
         console.warn('Appwrite createDocument history failed:', createErr.message);
+        throw createErr;
       }
     } else {
-      console.warn('Error saving history in Appwrite:', error.message);
+      const enriched = enrichError(error);
+      console.warn('Error saving history in Appwrite:', enriched.message);
+      throw enriched;
     }
   }
 }

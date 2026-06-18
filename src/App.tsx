@@ -35,13 +35,91 @@ import {
   saveHabitsToAppwrite,
   saveHistoryToAppwrite,
   loadUserDataFromAppwrite,
-  listAllProfilesFromAppwrite
+  listAllProfilesFromAppwrite,
+  getAppwriteConfig,
+  saveAppwriteConfig,
+  enrichError
 } from './lib/appwrite';
+import { client as appwriteClient } from './lib/appwriteClient';
 
 // Localstorage keys
 const HABITS_STORAGE_KEY = 'santuario_habitos';
 const HISTORY_STORAGE_KEY = 'santuario_historico';
 const PROFILE_STORAGE_KEY = 'santuario_perfil';
+
+// Helper to merge local and cloud history lists securely to prevent any data overwrite or loss
+function mergeHistory(localHist: DayProgress[], cloudHist: DayProgress[]): DayProgress[] {
+  const mergedMap = new Map<string, DayProgress>();
+
+  const addEntryToMap = (entry: DayProgress) => {
+    const existing = mergedMap.get(entry.date);
+    if (!existing) {
+      mergedMap.set(entry.date, { ...entry });
+    } else {
+      const habitsSet = new Set([...(existing.habitsCompleted || []), ...(entry.habitsCompleted || [])]);
+      
+      const existingSessions = existing.sessions || [];
+      const entrySessions = entry.sessions || [];
+      const sessionsMap = new Map<string, any>();
+      
+      existingSessions.forEach(s => {
+        const key = s.timestamp || `${s.durationSeconds}-${s.tag}`;
+        sessionsMap.set(key, s);
+      });
+      entrySessions.forEach(s => {
+        const key = s.timestamp || `${s.durationSeconds}-${s.tag}`;
+        if (!sessionsMap.has(key)) {
+          sessionsMap.set(key, s);
+        }
+      });
+
+      mergedMap.set(entry.date, {
+        date: entry.date,
+        habitsCompleted: Array.from(habitsSet),
+        meditationSeconds: Math.max(existing.meditationSeconds || 0, entry.meditationSeconds || 0),
+        reflection: entry.reflection && entry.reflection.trim() 
+          ? entry.reflection 
+          : (existing.reflection || ''),
+        sessions: Array.from(sessionsMap.values())
+      });
+    }
+  };
+
+  (localHist || []).forEach(addEntryToMap);
+  (cloudHist || []).forEach(addEntryToMap);
+
+  return Array.from(mergedMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function mergeProfiles(localProf: UserProfile, cloudProf: UserProfile): UserProfile {
+  // If local has more XP, keep local progress (it has more newer progress, preventing empty clouds from wiping offline days)
+  const useLocal = (localProf?.xp || 0) >= (cloudProf?.xp || 0);
+  
+  return {
+    name: useLocal ? (localProf?.name || cloudProf?.name) : (cloudProf?.name || localProf?.name),
+    level: Math.max(localProf?.level || 1, cloudProf?.level || 1),
+    xp: Math.max(localProf?.xp || 0, cloudProf?.xp || 0),
+    streak: Math.max(localProf?.streak || 0, cloudProf?.streak || 0),
+    maxStreak: Math.max(localProf?.maxStreak || 0, cloudProf?.maxStreak || 0),
+    lastActiveDate: useLocal ? (localProf?.lastActiveDate || '') : (cloudProf?.lastActiveDate || ''),
+    notificationPreferences: localProf?.notificationPreferences || cloudProf?.notificationPreferences || {
+      enabled: true,
+      morningTime: '07:00',
+      eveningTime: '21:00'
+    }
+  };
+}
+
+function mergeHabits(localHabits: Habit[], cloudHabits: Habit[]): Habit[] {
+  const mergedMap = new Map<string, Habit>();
+  (localHabits || []).forEach(h => mergedMap.set(h.id, h));
+  (cloudHabits || []).forEach(h => {
+    if (!mergedMap.has(h.id)) {
+      mergedMap.set(h.id, h);
+    }
+  });
+  return Array.from(mergedMap.values());
+}
 
 // Format date to local YYYY-MM-DD
 // Parse YYYY-MM-DD date string safely without timezone offsets
@@ -118,7 +196,23 @@ export default function App() {
   // Appwrite Sync States
   const [userId, setUserId] = useState<string>(() => getOrCreateUserId());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [appwriteConnected, setAppwriteConnected] = useState<boolean>(() => isAppwriteConfigured());
+  const [appwriteSyncEnabled, setAppwriteSyncEnabled] = useState<boolean>(() => localStorage.getItem('appwrite_sync_enabled') !== 'false');
+  const [appwriteConnected, setAppwriteConnected] = useState<boolean>(() => isAppwriteConfigured() && localStorage.getItem('appwrite_sync_enabled') !== 'false');
+
+  // Automatically ping the Appwrite server to verify the SDK setup when the app is opened
+  useEffect(() => {
+    try {
+      console.log("Pinging Appwrite server connection...");
+      if (typeof (appwriteClient as any).ping === 'function') {
+        (appwriteClient as any).ping();
+      } else {
+        (appwriteClient as any).ping();
+      }
+      showToast("Appwrite: Ping enviado com sucesso para verificar a conexão do SDK!", "info");
+    } catch (error) {
+      console.warn("Appwrite system ping error on initial mount:", error);
+    }
+  }, []);
   
   // Backup / Sincronização Modal States
   const [showBackupModal, setShowBackupModal] = useState<boolean>(false);
@@ -127,6 +221,25 @@ export default function App() {
   const [backupStatusMessage, setBackupStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [availableProfiles, setAvailableProfiles] = useState<Array<{ userId: string; name: string; level: number; xp: number; streak: number; lastActiveDate: string }> | null>(null);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState<boolean>(false);
+
+  // Advanced Appwrite Connection inputs
+  const [showAdvancedConfig, setShowAdvancedConfig] = useState<boolean>(false);
+  const [advEndpoint, setAdvEndpoint] = useState<string>(() => getAppwriteConfig().endpoint);
+  const [advProjectId, setAdvProjectId] = useState<string>(() => getAppwriteConfig().projectId);
+  const [advDatabaseId, setAdvDatabaseId] = useState<string>(() => getAppwriteConfig().databaseId);
+  const [advProfileCol, setAdvProfileCol] = useState<string>(() => getAppwriteConfig().profileCollection);
+  const [advHabitsCol, setAdvHabitsCol] = useState<string>(() => getAppwriteConfig().habitsCollection);
+  const [advHistoryCol, setAdvHistoryCol] = useState<string>(() => getAppwriteConfig().historyCollection);
+
+  // Animated modern Toast system compatible with iframe overlay limits
+  const [toasts, setToasts] = useState<Array<{ id: string; text: string; type: 'success' | 'error' | 'info' }>>([]);
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, text, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 6000);
+  };
 
   // Specific refs to skip save-back loops when loading values from the cloud
   const skipHabitsSaveRef = useRef<boolean>(false);
@@ -137,51 +250,79 @@ export default function App() {
   // Trigger full sync load function
   const triggerAppwriteSync = (targetUserId: string = userId, quiet: boolean = true) => {
     if (!isAppwriteConfigured()) {
-      if (!quiet) alert("Appwrite não está configurado com Project ID.");
+      if (!quiet) showToast("Appwrite não está configurado com Project ID.", "info");
       return Promise.resolve(false);
     }
     setIsSyncing(true);
     return loadUserDataFromAppwrite(targetUserId).then(cloudData => {
       if (cloudData) {
-        skipHabitsSaveRef.current = true;
-        skipHistorySaveRef.current = true;
-        skipProfileSaveRef.current = true;
+        // Read fresh real-time local copies from localStorage to avoid stale React hook state closures!
+        let currentLocalProfile = profile;
+        let currentLocalHabits = habits;
+        let currentLocalHistory = history;
 
-        if (cloudData.profile) {
-          setProfile(cloudData.profile);
-          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
-        } else {
-          saveProfileToAppwrite(targetUserId, profile);
+        const storedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
+        if (storedProfile) {
+          try { currentLocalProfile = JSON.parse(storedProfile); } catch(e){}
+        }
+        const storedHabits = localStorage.getItem(HABITS_STORAGE_KEY);
+        if (storedHabits) {
+          try { currentLocalHabits = JSON.parse(storedHabits); } catch(e){}
+        }
+        const storedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+        if (storedHistory) {
+          try { currentLocalHistory = JSON.parse(storedHistory); } catch(e){}
         }
 
-        if (cloudData.habits) {
-          setHabits(cloudData.habits);
-          localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
-        } else {
-          saveHabitsToAppwrite(targetUserId, habits);
+        const mergedProfile = cloudData.profile ? mergeProfiles(currentLocalProfile, cloudData.profile) : currentLocalProfile;
+        const mergedHabits = cloudData.habits ? mergeHabits(currentLocalHabits, cloudData.habits) : currentLocalHabits;
+        const mergedHistory = cloudData.history ? mergeHistory(currentLocalHistory, cloudData.history) : currentLocalHistory;
+
+        const profileChanged = JSON.stringify(profile) !== JSON.stringify(mergedProfile);
+        const habitsChanged = JSON.stringify(habits) !== JSON.stringify(mergedHabits);
+        const historyChanged = JSON.stringify(history) !== JSON.stringify(mergedHistory);
+
+        if (profileChanged) {
+          skipProfileSaveRef.current = true;
+          setProfile(mergedProfile);
+          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(mergedProfile));
+        }
+        if (habitsChanged) {
+          skipHabitsSaveRef.current = true;
+          setHabits(mergedHabits);
+          localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(mergedHabits));
+        }
+        if (historyChanged) {
+          skipHistorySaveRef.current = true;
+          setHistory(mergedHistory);
+          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(mergedHistory));
         }
 
-        if (cloudData.history) {
-          setHistory(cloudData.history);
-          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
-        } else {
-          saveHistoryToAppwrite(targetUserId, history);
-        }
-        setAppwriteConnected(true);
-        if (!quiet) alert("Sincronização realizada com sucesso! Seus dados espirituais estão sincronizados na nuvem.");
-        return true;
+        // Push fully merged stats back to the cloud to keep them in perfect alignment
+        return Promise.allSettled([
+          saveProfileToAppwrite(targetUserId, mergedProfile),
+          saveHabitsToAppwrite(targetUserId, mergedHabits),
+          saveHistoryToAppwrite(targetUserId, mergedHistory)
+        ]).then(() => {
+          setAppwriteConnected(true);
+          if (!quiet) showToast("Sincronização realizada com sucesso! Seus dados espirituais estão sincronizados na nuvem.", "success");
+          return true;
+        });
       } else {
         // First sync for a new account: push current local state up to populate cloud
-        saveProfileToAppwrite(targetUserId, profile);
-        saveHabitsToAppwrite(targetUserId, habits);
-        saveHistoryToAppwrite(targetUserId, history);
-        setAppwriteConnected(true);
-        if (!quiet) alert("Conexão estabelecida! O progresso local foi enviado para o Appwrite para inicializar sua nuvem.");
-        return true;
+        return Promise.allSettled([
+          saveProfileToAppwrite(targetUserId, profile),
+          saveHabitsToAppwrite(targetUserId, habits),
+          saveHistoryToAppwrite(targetUserId, history)
+        ]).then(() => {
+          setAppwriteConnected(true);
+          if (!quiet) showToast("Conexão estabelecida! O progresso local foi enviado para o Appwrite para inicializar sua nuvem.", "success");
+          return true;
+        });
       }
     }).catch(err => {
       console.warn('Appwrite sync failure:', err);
-      if (!quiet) alert(`Falha de sincronização: ${err.message || err}`);
+      if (!quiet) showToast(`Falha de sincronização: ${err.message || err}`, "error");
       setAppwriteConnected(false);
       return false;
     }).finally(() => {
@@ -196,47 +337,9 @@ export default function App() {
   // 1. Initial State Loading from LocalStorage & Appwrite Cloud Backup Sync
   useEffect(() => {
     // Phase B: Fetch from Appwrite in background to load remote database matches
-    if (isAppwriteConfigured()) {
+    if (isAppwriteConfigured() && appwriteSyncEnabled) {
       setIsSyncing(true);
-      loadUserDataFromAppwrite(userId).then(cloudData => {
-        if (cloudData) {
-          skipHabitsSaveRef.current = true;
-          skipHistorySaveRef.current = true;
-          skipProfileSaveRef.current = true;
-
-          if (cloudData.profile) {
-            setProfile(cloudData.profile);
-            localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
-          } else {
-            saveProfileToAppwrite(userId, profile);
-          }
-
-          if (cloudData.habits) {
-            setHabits(cloudData.habits);
-            localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
-          } else {
-            saveHabitsToAppwrite(userId, habits);
-          }
-
-          if (cloudData.history) {
-            setHistory(cloudData.history);
-            localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
-          } else {
-            saveHistoryToAppwrite(userId, history);
-          }
-
-          setAppwriteConnected(true);
-        } else {
-          // Empty or new remote profile -> automatically push our data to cloud on start
-          saveProfileToAppwrite(userId, profile);
-          saveHabitsToAppwrite(userId, habits);
-          saveHistoryToAppwrite(userId, history);
-          setAppwriteConnected(true);
-        }
-      }).catch(err => {
-        console.warn('Appwrite cloud synchronization missed or offline:', err);
-        setAppwriteConnected(false); // Display red cloud when offline or network fails
-      }).finally(() => {
+      triggerAppwriteSync(userId, true).finally(() => {
         setIsSyncing(false);
         initialCloudSyncDoneRef.current = true; // Mark initialization completed!
       });
@@ -244,7 +347,7 @@ export default function App() {
       // If Appwrite is not configured, we are fully initialized locally
       initialCloudSyncDoneRef.current = true;
     }
-  }, [userId]);
+  }, [userId, appwriteSyncEnabled]);
 
   // 2. Persistent saving engine triggers whenever local React state updates
   useEffect(() => {
@@ -253,10 +356,13 @@ export default function App() {
       skipHabitsSaveRef.current = false;
       return;
     }
-    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured()) {
-      saveHabitsToAppwrite(userId, habits);
+    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured() && appwriteSyncEnabled) {
+      saveHabitsToAppwrite(userId, habits).catch(err => {
+        console.warn("Falha ao salvar hábitos no Appwrite:", err);
+        setAppwriteConnected(false);
+      });
     }
-  }, [habits, userId, appwriteConnected]);
+  }, [habits, userId, appwriteConnected, appwriteSyncEnabled]);
 
   useEffect(() => {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
@@ -264,10 +370,13 @@ export default function App() {
       skipHistorySaveRef.current = false;
       return;
     }
-    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured()) {
-      saveHistoryToAppwrite(userId, history);
+    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured() && appwriteSyncEnabled) {
+      saveHistoryToAppwrite(userId, history).catch(err => {
+        console.warn("Falha ao salvar histórico no Appwrite:", err);
+        setAppwriteConnected(false);
+      });
     }
-  }, [history, userId, appwriteConnected]);
+  }, [history, userId, appwriteConnected, appwriteSyncEnabled]);
 
   useEffect(() => {
     localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
@@ -275,10 +384,13 @@ export default function App() {
       skipProfileSaveRef.current = false;
       return;
     }
-    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured()) {
-      saveProfileToAppwrite(userId, profile);
+    if (initialCloudSyncDoneRef.current && appwriteConnected && isAppwriteConfigured() && appwriteSyncEnabled) {
+      saveProfileToAppwrite(userId, profile).catch(err => {
+        console.warn("Falha ao salvar perfil no Appwrite:", err);
+        setAppwriteConnected(false);
+      });
     }
-  }, [profile, userId, appwriteConnected]);
+  }, [profile, userId, appwriteConnected, appwriteSyncEnabled]);
 
   // 3. Recalculate streak values dynamically from history completions database whenever it updates
   useEffect(() => {
@@ -304,45 +416,67 @@ export default function App() {
     }
     
     setIsSyncing(true);
-    setBackupStatusMessage({ text: 'Buscando dados espirituais na nuvem...', type: 'info' });
+    setBackupStatusMessage({ text: 'Buscando e mesclando dados espirituais na nuvem...', type: 'info' });
     
     loadUserDataFromAppwrite(cleanId).then(cloudData => {
       if (cloudData) {
-        // Marcamos as salvaguardas para não sobrescrever a nuvem com dados em branco locais no meio do set
+        let currentLocalProfile = profile;
+        let currentLocalHabits = habits;
+        let currentLocalHistory = history;
+
+        const storedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
+        if (storedProfile) {
+          try { currentLocalProfile = JSON.parse(storedProfile); } catch(e){}
+        }
+        const storedHabits = localStorage.getItem(HABITS_STORAGE_KEY);
+        if (storedHabits) {
+          try { currentLocalHabits = JSON.parse(storedHabits); } catch(e){}
+        }
+        const storedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+        if (storedHistory) {
+          try { currentLocalHistory = JSON.parse(storedHistory); } catch(e){}
+        }
+
+        const mergedProfile = cloudData.profile ? mergeProfiles(currentLocalProfile, cloudData.profile) : currentLocalProfile;
+        const mergedHabits = cloudData.habits ? mergeHabits(currentLocalHabits, cloudData.habits) : currentLocalHabits;
+        const mergedHistory = cloudData.history ? mergeHistory(currentLocalHistory, cloudData.history) : currentLocalHistory;
+
+        skipProfileSaveRef.current = true;
         skipHabitsSaveRef.current = true;
         skipHistorySaveRef.current = true;
-        skipProfileSaveRef.current = true;
-        
-        // Atualiza a chave local e o estado de ID global
+
+        setProfile(mergedProfile);
+        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(mergedProfile));
+
+        setHabits(mergedHabits);
+        localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(mergedHabits));
+
+        setHistory(mergedHistory);
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(mergedHistory));
+
         localStorage.setItem('santuario_uid', cleanId);
         setUserId(cleanId);
-        
-        if (cloudData.profile) {
-          setProfile(cloudData.profile);
-          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(cloudData.profile));
-        }
-        if (cloudData.habits) {
-          setHabits(cloudData.habits);
-          localStorage.setItem(HABITS_STORAGE_KEY, JSON.stringify(cloudData.habits));
-        }
-        if (cloudData.history) {
-          setHistory(cloudData.history);
-          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(cloudData.history));
-        }
-        
-        setAppwriteConnected(true);
-        setBackupStatusMessage({ text: 'Santuário sintonizado! Seus dados e seu histórico anterior foram carregados com sucesso!', type: 'success' });
+
+        return Promise.allSettled([
+          saveProfileToAppwrite(cleanId, mergedProfile),
+          saveHabitsToAppwrite(cleanId, mergedHabits),
+          saveHistoryToAppwrite(cleanId, mergedHistory)
+        ]).then(() => {
+          setAppwriteConnected(true);
+          setBackupStatusMessage({ text: 'Santuário sintonizado! Seus dados locais foram carregados e mesclados com sucesso com a nuvem!', type: 'success' });
+        });
       } else {
-        // Registro de ID inexistente mas válido para sessões futuras
         localStorage.setItem('santuario_uid', cleanId);
         setUserId(cleanId);
         
-        saveProfileToAppwrite(cleanId, profile);
-        saveHabitsToAppwrite(cleanId, habits);
-        saveHistoryToAppwrite(cleanId, history);
-        
-        setAppwriteConnected(true);
-        setBackupStatusMessage({ text: 'Nenhum dado encontrado para esse código. Um novo templo de orações foi criado na nuvem com este código!', type: 'success' });
+        return Promise.allSettled([
+          saveProfileToAppwrite(cleanId, profile),
+          saveHabitsToAppwrite(cleanId, habits),
+          saveHistoryToAppwrite(cleanId, history)
+        ]).then(() => {
+          setAppwriteConnected(true);
+          setBackupStatusMessage({ text: 'Nenhum dado encontrado para esse código. Um novo templo de orações foi criado na nuvem com este código!', type: 'success' });
+        });
       }
     }).catch(err => {
       console.warn('Appwrite sync import failed:', err);
@@ -353,7 +487,7 @@ export default function App() {
   };
 
   const fetchAvailableProfiles = () => {
-    if (!isAppwriteConfigured()) return;
+    if (!isAppwriteConfigured() || !appwriteSyncEnabled) return;
     setIsLoadingProfiles(true);
     listAllProfilesFromAppwrite()
       .then(profiles => {
@@ -636,21 +770,31 @@ export default function App() {
                 setShowBackupModal(true);
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
-                appwriteConnected
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                  : 'bg-rose-500/10 text-rose-500 border-rose-500/20 hover:bg-rose-500/20'
+                !appwriteSyncEnabled
+                  ? 'bg-slate-500/10 text-slate-400 border-slate-800 hover:bg-slate-805 hover:bg-slate-800/50'
+                  : appwriteConnected
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                    : 'bg-rose-500/10 text-rose-500 border-rose-500/20 hover:bg-rose-500/20'
               }`}
               title="Gerenciar Sincronização na Nuvem"
             >
               {isSyncing ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
+              ) : !appwriteSyncEnabled ? (
+                <CloudOff className="w-3.5 h-3.5 text-slate-400" />
               ) : appwriteConnected ? (
                 <Cloud className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400/20" />
               ) : (
                 <Cloud className="w-3.5 h-3.5 text-rose-500 fill-rose-500/20" />
               )}
               <span className="hidden sm:inline">
-                {isSyncing ? 'Sincronizando...' : appwriteConnected ? 'Sincronizado' : 'Offline'}
+                {isSyncing 
+                  ? 'Sincronizando...' 
+                  : !appwriteSyncEnabled 
+                    ? 'Modo Local' 
+                    : appwriteConnected 
+                      ? 'Sincronizado' 
+                      : 'Offline'}
               </span>
             </button>
 
@@ -853,6 +997,54 @@ export default function App() {
                 />
               </div>
 
+              {/* Controle de Sincronização em Nuvem (Ativar/Desativar) */}
+              <div className="flex items-center justify-between p-3.5 bg-slate-950/40 rounded-xl border border-slate-850/60 font-sans">
+                <div className="space-y-0.5 max-w-[75%]">
+                  <span className="text-[11px] font-extrabold text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
+                    {appwriteSyncEnabled ? (
+                      <Cloud className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400/10" />
+                    ) : (
+                      <CloudOff className="w-3.5 h-3.5 text-slate-500" />
+                    )}
+                    Sincronização em Nuvem
+                  </span>
+                  <span className="text-[9px] text-slate-500 block leading-snug">
+                    {appwriteSyncEnabled 
+                      ? 'Ativada. Seus hábitos e preces são gravados na nuvem em tempo real.' 
+                      : 'Utilizando apenas Memória Local. Sem tráfego de rede ou alarmes de conexão.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  id="btn-toggle-sync"
+                  onClick={() => {
+                    const nextValue = !appwriteSyncEnabled;
+                    setAppwriteSyncEnabled(nextValue);
+                    localStorage.setItem('appwrite_sync_enabled', nextValue ? 'true' : 'false');
+                    if (nextValue) {
+                      if (isAppwriteConfigured()) {
+                        setAppwriteConnected(true);
+                        triggerAppwriteSync(userId, false);
+                      } else {
+                        showToast("Appwrite não está configurado. Cadastre as credenciais nos parâmetros avançados.", "info");
+                      }
+                    } else {
+                      setAppwriteConnected(false);
+                      showToast("Sincronização desativada. Gravando 100% offline.", "info");
+                    }
+                  }}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    appwriteSyncEnabled ? 'bg-amber-500' : 'bg-slate-800'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
+                      appwriteSyncEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
               {/* Seção 2: Código de Sincronização Atual */}
               <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-850/60 space-y-2">
                 <div>
@@ -976,6 +1168,181 @@ export default function App() {
                 )}
               </div>
 
+              {/* Seção 5: Configuração Avançada do Servidor (Appwrite) */}
+              <div className="pt-2 border-t border-slate-800/50">
+                <button
+                  type="button"
+                  id="btn-toggle-advanced-config"
+                  onClick={() => setShowAdvancedConfig(!showAdvancedConfig)}
+                  className="w-full text-left py-1 text-[11px] uppercase tracking-wider font-extrabold text-slate-400 flex items-center justify-between hover:text-slate-250 cursor-pointer transition-colors"
+                >
+                  <span className="flex items-center gap-1.5 font-sans">
+                    <Database className="w-3.5 h-3.5 text-amber-500" />
+                    Parâmetros Avançados (Appwrite)
+                  </span>
+                  <span className="text-slate-500 hover:text-slate-300 font-mono text-[10px]">
+                    {showAdvancedConfig ? '▲ Ocultar' : '▼ Expandir'}
+                  </span>
+                </button>
+
+                {showAdvancedConfig && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="space-y-3 mt-2 pb-1.5 bg-slate-950/50 p-3 rounded-xl border border-slate-850/60"
+                  >
+                    <div className="space-y-1">
+                      <span className="text-[9px] uppercase font-bold text-slate-500 block">Endereço do Servidor (Endpoint)</span>
+                      <input
+                        type="text"
+                        value={advEndpoint}
+                        onChange={(e) => setAdvEndpoint(e.target.value)}
+                        placeholder="Ex: https://cloud.appwrite.io/v1"
+                        className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[9px] uppercase font-bold text-slate-500 block">ID do Projeto Appwrite</span>
+                      <input
+                        type="text"
+                        value={advProjectId}
+                        onChange={(e) => setAdvProjectId(e.target.value)}
+                        placeholder="Ex: 60a7fd..."
+                        className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">ID do Banco</span>
+                        <input
+                          type="text"
+                          value={advDatabaseId}
+                          onChange={(e) => setAdvDatabaseId(e.target.value)}
+                          placeholder="Ex: santuario_db"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Perfil</span>
+                        <input
+                          type="text"
+                          value={advProfileCol}
+                          onChange={(e) => setAdvProfileCol(e.target.value)}
+                          placeholder="santuario_perfil"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Hábitos</span>
+                        <input
+                          type="text"
+                          value={advHabitsCol}
+                          onChange={(e) => setAdvHabitsCol(e.target.value)}
+                          placeholder="santuario_habitos"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-500 block">Coleção Histórico</span>
+                        <input
+                          type="text"
+                          value={advHistoryCol}
+                          onChange={(e) => setAdvHistoryCol(e.target.value)}
+                          placeholder="santuario_historico"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Botões para Salvar */}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        id="btn-save-advanced-appwrite"
+                        onClick={() => {
+                          saveAppwriteConfig({
+                            endpoint: advEndpoint,
+                            projectId: advProjectId,
+                            databaseId: advDatabaseId,
+                            profileCollection: advProfileCol,
+                            habitsCollection: advHabitsCol,
+                            historyCollection: advHistoryCol
+                          });
+                          // Reconnect and test connection
+                          const configured = isAppwriteConfigured();
+                          setAppwriteSyncEnabled(true);
+                          localStorage.setItem('appwrite_sync_enabled', 'true');
+                          setAppwriteConnected(configured);
+                          showToast("Configurações do Appwrite gravadas localmente!", "success");
+                          
+                          // Run real-time connection check sync
+                          triggerAppwriteSync(userId, false);
+                        }}
+                        className="flex-1 py-1.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-lg transition-colors cursor-pointer text-center"
+                      >
+                        Salvar &amp; Testar Conexão
+                      </button>
+
+                      <button
+                        type="button"
+                        id="btn-clear-advanced-appwrite"
+                        onClick={() => {
+                          localStorage.removeItem('appwrite_endpoint');
+                          localStorage.removeItem('appwrite_project_id');
+                          localStorage.removeItem('appwrite_database_id');
+                          localStorage.removeItem('appwrite_profile_col');
+                          localStorage.removeItem('appwrite_habits_col');
+                          localStorage.removeItem('appwrite_history_col');
+                          
+                          const defaults = getAppwriteConfig();
+                          setAdvEndpoint(defaults.endpoint);
+                          setAdvProjectId(defaults.projectId);
+                          setAdvDatabaseId(defaults.databaseId);
+                          setAdvProfileCol(defaults.profileCollection);
+                          setAdvHabitsCol(defaults.habitsCollection);
+                          setAdvHistoryCol(defaults.historyCollection);
+                          
+                          const configured = isAppwriteConfigured();
+                          setAppwriteConnected(configured);
+                          showToast("Configurações restauradas para o padrão do projeto!", "info");
+                          triggerAppwriteSync(userId, false);
+                        }}
+                        className="py-1.5 px-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 text-[10px] rounded-lg border border-slate-800 transition-colors cursor-pointer"
+                        title="Restaurar Padrões originais"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+
+                    {/* Guia diagnóstica para CORS / Falha ao Buscar */}
+                    <div className="mt-2 p-2 rounded-lg bg-amber-500/5 border border-amber-500/10 text-[9px] text-slate-400 leading-normal space-y-1">
+                      <span className="font-extrabold text-amber-400 block">🔍 Guia Diagnóstico de Rede &amp; CORS:</span>
+                      <p>
+                        Se enfrentar o erro <strong className="text-rose-400">"Failed to Fetch"</strong> (Falha ao buscar dados):
+                      </p>
+                      <ul className="list-disc pl-3.5 space-y-0.5 font-sans text-slate-300">
+                        <li>
+                          <strong>CORS no Painel Appwrite:</strong> Vá em <span className="text-amber-500">Configurações do Projeto &gt; Plataformas &gt; Adicionar Plataforma Web</span>. Cadastre o domínio desta página (ou use curinga <code className="bg-slate-900 text-amber-400 px-0.5 py-0.2 rounded font-mono">*</code>) para permitir requisições de origem cruzada CORS.
+                        </li>
+                        <li>
+                          <strong>Filtros do Adblocker:</strong> Extensões de navegador (uBlock Origin, Brave Shield, VPNs) às vezes interceptam requisições para a nuvem da Appwrite. Experimente desativá-los momentaneamente neste domínio.
+                        </li>
+                        <li>
+                          <strong>Status Offline:</strong> A aplicação continua funcionando 100% gravando no navegador. Seus dados se fundirão automaticamente quando o sinal se restabelecer.
+                        </li>
+                      </ul>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
               {/* Mensagem de Feedback de Backup */}
               {backupStatusMessage && (
                 <div className={`p-3 rounded-xl border text-[11px] font-medium leading-relaxed font-sans ${
@@ -1001,6 +1368,48 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Floating Modern Custom Toasts System */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-[90%] pointer-events-none md:w-auto">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: -20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+              className={`p-3.5 rounded-xl border shadow-xl flex items-start gap-2.5 pointer-events-auto select-none ${
+                toast.type === 'success'
+                  ? 'bg-emerald-950/95 text-emerald-350 border-emerald-500/30'
+                  : toast.type === 'error'
+                    ? 'bg-rose-950/95 text-rose-350 border-rose-500/30'
+                    : 'bg-slate-905 bg-slate-900/95 text-slate-100 border-slate-800'
+              }`}
+            >
+              <div className="mt-0.5 shrink-0">
+                {toast.type === 'success' ? (
+                  <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400" />
+                ) : toast.type === 'error' ? (
+                  <CloudOff className="w-4.5 h-4.5 text-rose-400" />
+                ) : (
+                  <Info className="w-4.5 h-4.5 text-indigo-400" />
+                )}
+              </div>
+              <div className="flex-1 text-xs font-semibold leading-normal whitespace-pre-line tracking-wide font-sans">
+                {toast.text}
+              </div>
+              <button
+                type="button"
+                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="text-slate-500 hover:text-slate-200 p-0.5 hover:bg-slate-800 rounded transition-colors shrink-0 cursor-pointer"
+                title="Fechar"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
     </div>
   );
