@@ -53,3 +53,12 @@ export interface TimerPreset {
   durationSeconds: number;
   timeOfDay: 'morning' | 'evening' | 'custom';
 }
+
+export interface AppSettings {
+  soundSelection: 'gong' | 'bell' | 'bowl' | 'none';
+  alertVolume: number; // 0 to 100
+  enableMilestoneAlerts: boolean;
+  enableDailyReminders: boolean;
+  reminderTime: string;
+}
+
