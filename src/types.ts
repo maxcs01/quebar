@@ -62,3 +62,12 @@ export interface AppSettings {
   reminderTime: string;
 }
 
+export interface PrayerRequest {
+  id: string;
+  personName: string;
+  requestText: string;
+  createdAt: string; // YYYY-MM-DD
+  expiresAt: string; // YYYY-MM-DD
+}
+
+

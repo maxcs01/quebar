@@ -11,13 +11,14 @@ import {
   X,
   Sliders,
   CheckCircle2,
-  Info
+  Info,
+  Heart
 } from 'lucide-react';
 
-import { Habit, DayProgress, UserProfile } from './types';
+import { Habit, DayProgress, UserProfile, PrayerRequest } from './types';
 import { DEFAULT_HABITS, LEVEL_THRESHOLDS, getLevelTitle } from './data/defaultData';
 import Dashboard from './components/Dashboard';
-import TimerTab from './components/TimerTab';
+import PrayersTab from './components/PrayersTab';
 import TrophiesTab from './components/TrophiesTab';
 import StatsTab from './components/StatsTab';
 import SettingsTab from './components/SettingsTab';
@@ -45,7 +46,7 @@ function formatDate(date: Date): string {
 
 export default function App() {
   // Navigation State supporting 5 premium sections
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'timer' | 'trophies' | 'stats' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'prayers' | 'trophies' | 'stats' | 'settings'>('dashboard');
 
   // Real-world date tracking
   const currentDateStr = useMemo(() => {
@@ -129,6 +130,78 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
   }, [profile]);
+
+  // Prayers State & CRUD
+  const [prayers, setPrayers] = useState<PrayerRequest[]>(() => {
+    const stored = localStorage.getItem('santuario_pedidos');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('santuario_pedidos', JSON.stringify(prayers));
+  }, [prayers]);
+
+  const handleAddPrayer = (name: string, text: string) => {
+    const today = new Date();
+    const future = new Date(today);
+    future.setDate(today.getDate() + 7);
+    const expiresAt = formatDate(future);
+
+    const newPrayer: PrayerRequest = {
+      id: Date.now().toString(),
+      personName: name,
+      requestText: text,
+      createdAt: currentDateStr,
+      expiresAt: expiresAt
+    };
+
+    setPrayers(prev => [newPrayer, ...prev]);
+    showToast("Pedido de oração adicionado com sucesso!", "success");
+  };
+
+  const handleDeletePrayer = (id: string) => {
+    setPrayers(prev => prev.filter(p => p.id !== id));
+    showToast("Pedido de oração removido.", "success");
+  };
+
+  const handleReactivatePrayer = (id: string) => {
+    const today = new Date();
+    const future = new Date(today);
+    future.setDate(today.getDate() + 7);
+    const expiresAt = formatDate(future);
+
+    setPrayers(prev => prev.map(p => {
+      if (p.id === id) {
+        return {
+          ...p,
+          createdAt: currentDateStr,
+          expiresAt: expiresAt
+        };
+      }
+      return p;
+    }));
+    showToast("Período de oração renovado por mais 7 dias!", "success");
+  };
+
+  const handleUpdatePrayer = (id: string, name: string, text: string) => {
+    setPrayers(prev => prev.map(p => {
+      if (p.id === id) {
+        return {
+          ...p,
+          personName: name,
+          requestText: text
+        };
+      }
+      return p;
+    }));
+    showToast("Pedido de oração atualizado.", "success");
+  };
 
   // Recalculate streak values dynamically from history logs
   useEffect(() => {
@@ -375,9 +448,11 @@ export default function App() {
     localStorage.removeItem(PROFILE_STORAGE_KEY);
     localStorage.removeItem('santuario_settings');
     localStorage.removeItem('santuario_timer_state');
+    localStorage.removeItem('santuario_pedidos');
     
     setHabits(DEFAULT_HABITS);
     setHistory([]);
+    setPrayers([]);
     setProfile({
       name: 'Praticante Espiritual',
       level: 1,
@@ -470,13 +545,18 @@ export default function App() {
             onAddHabit={handleAddHabit}
             onDeleteHabit={handleDeleteHabit}
             onSaveReflection={handleSaveReflection}
+            onCompleteMeditation={handleCompleteMeditation}
           />
         </div>
 
-        <div className={activeTab === 'timer' ? 'block' : 'hidden'}>
-          <TimerTab 
-            onCompleteMeditation={handleCompleteMeditation}
-            userIdName={profile.name}
+        <div className={activeTab === 'prayers' ? 'block' : 'hidden'}>
+          <PrayersTab 
+            prayers={prayers}
+            onAddPrayer={handleAddPrayer}
+            onDeletePrayer={handleDeletePrayer}
+            onReactivatePrayer={handleReactivatePrayer}
+            onUpdatePrayer={handleUpdatePrayer}
+            currentDateStr={currentDateStr}
           />
         </div>
 
@@ -522,17 +602,17 @@ export default function App() {
           <span className="text-[10px] sm:text-xs">Início</span>
         </button>
 
-        {/* Cronômetro */}
+        {/* Orações */}
         <button
-          onClick={() => setActiveTab('timer')}
+          onClick={() => setActiveTab('prayers')}
           className={`flex-1 sm:flex-initial flex flex-col sm:flex-row items-center justify-center gap-1.5 py-2 px-4 rounded-xl transition-all cursor-pointer ${
-            activeTab === 'timer' 
+            activeTab === 'prayers' 
               ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-950/20' 
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
           }`}
         >
-          <Clock className="w-4 h-4 shrink-0" />
-          <span className="text-[10px] sm:text-xs">Vigília</span>
+          <Heart className="w-4 h-4 shrink-0" />
+          <span className="text-[10px] sm:text-xs">Orações</span>
         </button>
 
         {/* Trunfos */}
