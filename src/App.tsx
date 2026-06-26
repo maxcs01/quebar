@@ -47,6 +47,7 @@ function formatDate(date: Date): string {
 export default function App() {
   // Navigation State supporting 5 premium sections
   const [activeTab, setActiveTab] = useState<'dashboard' | 'prayers' | 'trophies' | 'stats' | 'settings'>('dashboard');
+  const [activeStatsSubTab, setActiveStatsSubTab] = useState<'evolution' | 'distribution' | 'heatmap' | 'levels'>('evolution');
 
   // Real-world date tracking
   const currentDateStr = useMemo(() => {
@@ -218,35 +219,42 @@ export default function App() {
     });
   }, [history, currentDateStr]);
 
-  // Level Up logic validator
-  const checkLevelUp = (currentXP: number, previousLevel: number) => {
+  // Synchronize level up when XP, streak, or history changes
+  useEffect(() => {
+    const totalHabits = history.reduce((acc, d) => acc + (d.habitsCompleted?.length || 0), 0);
+    const totalMedMins = Math.floor(history.reduce((acc, d) => acc + (d.meditationSeconds || 0), 0) / 60);
+    const currentXP = profile.xp;
+
     let computedLevel = 1;
     for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
-      if (currentXP >= LEVEL_THRESHOLDS[i].xpNeeded) {
-        computedLevel = LEVEL_THRESHOLDS[i].level;
+      const threshold = LEVEL_THRESHOLDS[i];
+      const xpOK = currentXP >= threshold.xpNeeded;
+      const streakOK = profile.streak >= (threshold.reqStreak || 0);
+      const habitsOK = totalHabits >= (threshold.reqHabits || 0);
+      const medOK = totalMedMins >= (threshold.reqMedMinutes || 0);
+
+      if (xpOK && streakOK && habitsOK && medOK) {
+        computedLevel = threshold.level;
         break;
       }
     }
 
-    if (computedLevel > previousLevel) {
+    if (computedLevel > profile.level) {
       setUnlockedLevel(computedLevel);
       setShowLevelUpModal(true);
-      return computedLevel;
+      setProfile(prev => ({
+        ...prev,
+        level: computedLevel
+      }));
     }
-    return previousLevel;
-  };
+  }, [profile.xp, profile.streak, history]);
 
   // Global XP score handler
   const addXP = (gainedXP: number) => {
-    setProfile(prev => {
-      const newXP = prev.xp + gainedXP;
-      const checkedLevel = checkLevelUp(newXP, prev.level);
-      return {
-        ...prev,
-        xp: newXP,
-        level: checkedLevel
-      };
-    });
+    setProfile(prev => ({
+      ...prev,
+      xp: prev.xp + gainedXP
+    }));
   };
 
   // Dynamic Streak Calculator
@@ -546,6 +554,12 @@ export default function App() {
             onDeleteHabit={handleDeleteHabit}
             onSaveReflection={handleSaveReflection}
             onCompleteMeditation={handleCompleteMeditation}
+            onNavigateToTab={(tab, subTab) => {
+              setActiveTab(tab);
+              if (subTab) {
+                setActiveStatsSubTab(subTab);
+              }
+            }}
           />
         </div>
 
@@ -574,6 +588,9 @@ export default function App() {
             history={history}
             streak={profile.streak}
             maxStreak={profile.maxStreak}
+            profile={profile}
+            activeSubTab={activeStatsSubTab}
+            onSubTabChange={setActiveStatsSubTab}
           />
         </div>
 

@@ -192,20 +192,141 @@ export interface LevelThreshold {
   level: number;
   xpNeeded: number;
   title: string;
+  reqStreak?: number;
+  reqHabits?: number;
+  reqMedMinutes?: number;
 }
 
-export const LEVEL_THRESHOLDS: LevelThreshold[] = [
-  { level: 1, xpNeeded: 0, title: 'Servo Iniciante' },
-  { level: 2, xpNeeded: 150, title: 'Discípulo da Fé' },
-  { level: 3, xpNeeded: 400, title: 'Sentinela da Oração' },
-  { level: 4, xpNeeded: 800, title: 'Soldado de Cristo' },
-  { level: 5, xpNeeded: 1400, title: 'Guardião da Retidão' },
-  { level: 6, xpNeeded: 2200, title: 'Devoto Fiel' },
-  { level: 7, xpNeeded: 3200, title: 'Coluna da Igreja' },
-  { level: 8, xpNeeded: 4500, title: 'Exemplo de Piedade' },
-  { level: 9, xpNeeded: 6000, title: 'Farol do Evangelho' },
-  { level: 10, xpNeeded: 8000, title: 'Testemunha da Luz' }
+const LEVEL_TITLES: string[] = [
+  'Servo Iniciante',
+  'Discípulo da Fé',
+  'Sentinela da Oração',
+  'Soldado de Cristo',
+  'Guardião da Retidão',
+  'Devoto Fiel',
+  'Coluna da Igreja',
+  'Exemplo de Piedade',
+  'Farol do Evangelho',
+  'Testemunha da Luz',
+  'Aspirante à Sabedoria',
+  'Buscador da Verdade',
+  'Semeador da Palavra',
+  'Pacificador Ativo',
+  'Praticante da Humildade',
+  'Perseverante no Altar',
+  'Intercessor Constante',
+  'Guardião da Doutrina',
+  'Vivente na Graça',
+  'Defensor da Fé',
+  'Peregrino da Esperança',
+  'Combatente Espiritual',
+  'Vaso de Honra',
+  'Luz do Mundo',
+  'Sal da Terra',
+  'Servo Fiel e Prudente',
+  'Mensageiro da Paz',
+  'Embaixador do Reino',
+  'Testemunha Fiel',
+  'Guerreiro de Oração',
+  'Amigo da Sabedoria',
+  'Conquistador de Almas',
+  'Discípulo do Silêncio',
+  'Teólogo Prático',
+  'Sentinela da Alvorada',
+  'Guardião do Templo',
+  'Compassivo Samaritano',
+  'Ministro da Reconciliação',
+  'Arauto da Justiça',
+  'Doutor da Fé',
+  'Contemplativo do Monte',
+  'Discípulo do Amor',
+  'Pilar Espiritual',
+  'Consagrado do Altar',
+  'Mensageiro do Tabernáculo',
+  'Testemunho Inabalável',
+  'Guardião das Escrituras',
+  'Apóstolo do Cuidado',
+  'Patriarca da Piedade',
+  'Patriarca do Altar de Glória'
 ];
+
+export const LEVEL_THRESHOLDS: LevelThreshold[] = Array.from({ length: 50 }, (_, i) => {
+  const level = i + 1;
+  const title = LEVEL_TITLES[i] || `Mestre Espiritual ${level}`;
+  
+  // Calculate progressive requirements
+  let xpNeeded = 0;
+  let reqStreak = 0;
+  let reqHabits = 0;
+  let reqMedMinutes = 0;
+
+  if (level === 1) {
+    xpNeeded = 0;
+    reqStreak = 0;
+    reqHabits = 0;
+    reqMedMinutes = 0;
+  } else if (level === 2) {
+    xpNeeded = 150;
+    reqStreak = 0;
+    reqHabits = 1;
+    reqMedMinutes = 0;
+  } else if (level === 3) {
+    xpNeeded = 400;
+    reqStreak = 1;
+    reqHabits = 3;
+    reqMedMinutes = 5;
+  } else if (level === 4) {
+    xpNeeded = 800;
+    reqStreak = 1;
+    reqHabits = 6;
+    reqMedMinutes = 10;
+  } else if (level === 5) {
+    xpNeeded = 1300;
+    reqStreak = 2;
+    reqHabits = 10;
+    reqMedMinutes = 15;
+  } else if (level === 6) {
+    xpNeeded = 1900;
+    reqStreak = 2;
+    reqHabits = 15;
+    reqMedMinutes = 20;
+  } else if (level === 7) {
+    xpNeeded = 2600;
+    reqStreak = 3;
+    reqHabits = 22;
+    reqMedMinutes = 30;
+  } else if (level === 8) {
+    xpNeeded = 3400;
+    reqStreak = 3;
+    reqHabits = 30;
+    reqMedMinutes = 40;
+  } else if (level === 9) {
+    xpNeeded = 4300;
+    reqStreak = 4;
+    reqHabits = 40;
+    reqMedMinutes = 50;
+  } else if (level === 10) {
+    xpNeeded = 5300;
+    reqStreak = 4;
+    reqHabits = 50;
+    reqMedMinutes = 60;
+  } else if (level > 10) {
+    const offset = level - 10;
+    xpNeeded = 5300 + offset * 1200;
+    reqStreak = 4 + Math.floor(offset / 4); // max 14 days
+    reqHabits = 50 + offset * 15; // max 650 habits completed
+    reqMedMinutes = 60 + offset * 15; // max 660 mins of meditation/prayer
+  }
+
+  return {
+    level,
+    xpNeeded,
+    title,
+    reqStreak,
+    reqHabits,
+    reqMedMinutes
+  };
+});
 
 export function getLevelTitle(level: number): string {
   const threshold = LEVEL_THRESHOLDS.find(t => t.level === level) || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];

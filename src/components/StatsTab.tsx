@@ -19,18 +19,33 @@ import {
   PieChart,
   Compass
 } from 'lucide-react';
-import { Habit, DayProgress } from '../types';
+import { Habit, DayProgress, UserProfile } from '../types';
+import LevelsTab from './LevelsTab';
 
 interface StatsTabProps {
   habits: Habit[];
   history: DayProgress[];
   streak: number;
   maxStreak: number;
+  profile: UserProfile;
+  activeSubTab?: 'evolution' | 'distribution' | 'heatmap' | 'levels';
+  onSubTabChange?: (tab: 'evolution' | 'distribution' | 'heatmap' | 'levels') => void;
 }
 
-export default function StatsTab({ habits, history, streak, maxStreak }: StatsTabProps) {
+export default function StatsTab({ 
+  habits, 
+  history, 
+  streak, 
+  maxStreak,
+  profile,
+  activeSubTab,
+  onSubTabChange
+}: StatsTabProps) {
   // Navigation inside Stats Tab
-  const [activeChartSection, setActiveChartSection] = useState<'evolution' | 'distribution' | 'heatmap'>('evolution');
+  const [localActiveChartSection, setLocalActiveChartSection] = useState<'evolution' | 'distribution' | 'heatmap' | 'levels'>('evolution');
+  const activeChartSection = activeSubTab || localActiveChartSection;
+  const setActiveChartSection = onSubTabChange || setLocalActiveChartSection;
+
   const [timeframe, setTimeframe] = useState<'7days' | '15days' | '30days'>('7days');
   const [evolutionChartType, setEvolutionChartType] = useState<'habits' | 'prayer' | 'reading'>('habits');
   const [selectedMonthOffset, setSelectedMonthOffset] = useState<number>(0);
@@ -468,6 +483,15 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
               <Grid className="w-4 h-4" />
               Intensidade (Heatmap)
             </button>
+            <button
+              onClick={() => setActiveChartSection('levels')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                activeChartSection === 'levels' ? 'bg-sky-500 text-slate-950 font-black shadow-md' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Award className="w-4 h-4" />
+              Níveis e Requisitos
+            </button>
           </div>
 
           {activeChartSection === 'evolution' && (
@@ -868,6 +892,10 @@ export default function StatsTab({ habits, history, streak, maxStreak }: StatsTa
                 </div>
 
               </motion.div>
+            )}
+
+            {activeChartSection === 'levels' && (
+              <LevelsTab profile={profile} history={history} />
             )}
 
           </AnimatePresence>

@@ -32,6 +32,7 @@ interface DashboardProps {
   onDeleteHabit: (habitId: string) => void;
   onSaveReflection: (text: string) => void;
   onCompleteMeditation: (seconds: number, tag: 'despertar' | 'manha' | 'noite' | 'aleatorio' | 'leitura') => void;
+  onNavigateToTab?: (tab: 'dashboard' | 'prayers' | 'trophies' | 'stats' | 'settings', subTab?: 'evolution' | 'distribution' | 'heatmap' | 'levels') => void;
 }
 
 const SPIRITUAL_QUOTES = [
@@ -53,7 +54,8 @@ export default function Dashboard({
   onAddHabit,
   onDeleteHabit,
   onSaveReflection,
-  onCompleteMeditation
+  onCompleteMeditation,
+  onNavigateToTab
 }: DashboardProps) {
   // Custom habit creation states
   const [showAddHabitForm, setShowAddHabitForm] = useState(false);
@@ -487,7 +489,10 @@ export default function Dashboard({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
         
         {/* Profile Card & XP progression bar (Left, 5 columns) */}
-        <div className="md:col-span-5 bg-slate-900 border border-slate-850 p-4.5 rounded-3xl flex flex-col justify-between space-y-4">
+        <div 
+          onClick={() => onNavigateToTab?.('stats', 'levels')}
+          className="md:col-span-5 bg-slate-900 border border-slate-850 p-4.5 rounded-3xl flex flex-col justify-between space-y-4 cursor-pointer hover:border-slate-750 hover:shadow-lg transition-all"
+        >
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-md font-bold text-slate-100 flex items-center gap-1.5">
