@@ -61,7 +61,7 @@ export default function LevelsTab({ profile, history }: LevelsTabProps) {
   // Determine if requirements are met for a level
   const isLevelUnlocked = (lvl: typeof LEVEL_THRESHOLDS[0]) => {
     return currentXP >= lvl.xpNeeded && 
-           profile.streak >= (lvl.reqStreak || 0) &&
+           Math.max(profile.streak, profile.maxStreak) >= (lvl.reqStreak || 0) &&
            totalHabits >= (lvl.reqHabits || 0) &&
            totalMedMinutes >= (lvl.reqMedMinutes || 0);
   };
@@ -201,25 +201,25 @@ export default function LevelsTab({ profile, history }: LevelsTabProps) {
 
             {/* Streak requirement */}
             <div className={`p-4 rounded-2xl border ${
-              profile.streak >= (nextLevelThreshold.reqStreak || 0)
+              Math.max(profile.streak, profile.maxStreak) >= (nextLevelThreshold.reqStreak || 0)
                 ? 'bg-emerald-500/5 border-emerald-500/20' 
                 : 'bg-slate-950/60 border-slate-850'
             }`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] uppercase font-bold text-slate-500">Fidelidade diária</span>
-                {profile.streak >= (nextLevelThreshold.reqStreak || 0) ? (
+                {Math.max(profile.streak, profile.maxStreak) >= (nextLevelThreshold.reqStreak || 0) ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 ) : (
                   <Lock className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                 )}
               </div>
               <div className="text-lg font-black font-mono text-slate-200">
-                {profile.streak} <span className="text-xs font-normal text-slate-500">/ {nextLevelThreshold.reqStreak || 0} dias</span>
+                {Math.max(profile.streak, profile.maxStreak)} <span className="text-xs font-normal text-slate-500">/ {nextLevelThreshold.reqStreak || 0} dias (Melhor)</span>
               </div>
               <div className="w-full bg-slate-900 h-1.5 rounded-full mt-2 overflow-hidden">
                 <div 
-                  style={{ width: `${(nextLevelThreshold.reqStreak || 0) > 0 ? Math.min(100, (profile.streak / (nextLevelThreshold.reqStreak || 1)) * 100) : 100}%` }} 
-                  className={`h-full ${profile.streak >= (nextLevelThreshold.reqStreak || 0) ? 'bg-emerald-400' : 'bg-sky-450'}`} 
+                  style={{ width: `${(nextLevelThreshold.reqStreak || 0) > 0 ? Math.min(100, (Math.max(profile.streak, profile.maxStreak) / (nextLevelThreshold.reqStreak || 1)) * 100) : 100}%` }} 
+                  className={`h-full ${Math.max(profile.streak, profile.maxStreak) >= (nextLevelThreshold.reqStreak || 0) ? 'bg-emerald-400' : 'bg-sky-450'}`} 
                 />
               </div>
             </div>
@@ -345,7 +345,7 @@ export default function LevelsTab({ profile, history }: LevelsTabProps) {
                         {/* Streak tag */}
                         {lvl.reqStreak && lvl.reqStreak > 0 ? (
                           <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded-md border ${
-                            profile.streak >= lvl.reqStreak 
+                            Math.max(profile.streak, profile.maxStreak) >= lvl.reqStreak 
                               ? 'bg-emerald-500/5 text-emerald-400/80 border-emerald-500/10' 
                               : 'bg-slate-950 text-slate-500 border-slate-900'
                           }`}>

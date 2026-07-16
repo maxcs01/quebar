@@ -219,7 +219,7 @@ export default function App() {
     });
   }, [history, currentDateStr]);
 
-  // Synchronize level up when XP, streak, or history changes
+  // Synchronize level up when XP, streak, maxStreak or history changes
   useEffect(() => {
     const totalHabits = history.reduce((acc, d) => acc + (d.habitsCompleted?.length || 0), 0);
     const totalMedMins = Math.floor(history.reduce((acc, d) => acc + (d.meditationSeconds || 0), 0) / 60);
@@ -229,7 +229,7 @@ export default function App() {
     for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
       const threshold = LEVEL_THRESHOLDS[i];
       const xpOK = currentXP >= threshold.xpNeeded;
-      const streakOK = profile.streak >= (threshold.reqStreak || 0);
+      const streakOK = Math.max(profile.streak, profile.maxStreak) >= (threshold.reqStreak || 0);
       const habitsOK = totalHabits >= (threshold.reqHabits || 0);
       const medOK = totalMedMins >= (threshold.reqMedMinutes || 0);
 
@@ -244,10 +244,10 @@ export default function App() {
       setShowLevelUpModal(true);
       setProfile(prev => ({
         ...prev,
-        level: computedLevel
+        level: Math.max(prev.level, computedLevel)
       }));
     }
-  }, [profile.xp, profile.streak, history]);
+  }, [profile.xp, profile.streak, profile.maxStreak, history]);
 
   // Global XP score handler
   const addXP = (gainedXP: number) => {
@@ -695,23 +695,58 @@ export default function App() {
                 <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Ascensão Espiritual</span>
                 <h3 className="text-2xl font-black text-slate-100 mt-1">Evolução de Nível!</h3>
                 <p className="text-xs text-slate-400 mt-2 font-sans">
-                  Seu compromisso com os propósitos de fé e a reforma íntima elevou sua perseverança a uma nova graça.
+                  Sua perseverança, oração e hábitos constantes romperam as barreiras da fé. Você ascendeu com mérito aos olhos do Reino!
                 </p>
               </div>
 
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-850">
-                <span className="text-[9px] uppercase font-bold text-slate-500 block">Novo Título Espiritual:</span>
-                <span className="text-amber-400 font-extrabold text-base block mt-1">
-                  Nível {unlockedLevel} — {getLevelTitle(unlockedLevel)}
-                </span>
+              <div className="space-y-2">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-850">
+                  <span className="text-[9px] uppercase font-bold text-slate-500 block">Novo Título Consagrado:</span>
+                  <span className="text-amber-400 font-extrabold text-base block mt-1">
+                    Nível {unlockedLevel} — {getLevelTitle(unlockedLevel)}
+                  </span>
+                </div>
+
+                <div className="bg-emerald-500/5 p-3.5 rounded-xl border border-emerald-500/15 text-left">
+                  <span className="text-[9px] uppercase font-bold text-emerald-400 block mb-1">Recompensa Liberada:</span>
+                  <span className="text-slate-200 text-xs font-semibold leading-relaxed block">
+                    {unlockedLevel === 1 ? "Acesso ao Altar de Intercessão (Pedidos de Oração)" :
+                     unlockedLevel === 2 ? "Cronômetro de Vigília Personalizado" :
+                     unlockedLevel === 3 ? "Medalha de Sentinela da Fé + Avatar Personalizado" :
+                     unlockedLevel === 4 ? "Iniciação em Exame de Consciência Noturno Avançado" :
+                     unlockedLevel === 5 ? "Ativação de Relatório e Análise de Hábitos Semanais" :
+                     unlockedLevel === 6 ? "Título 'Devoto Fiel' + Trunfos de Consistência Premium" :
+                     unlockedLevel === 7 ? "Som de Gongo Budista e Tigela Tibetana no Cronômetro" :
+                     unlockedLevel === 8 ? "Exportação de Diários de Reflexão Espiritual em Texto" :
+                     unlockedLevel === 9 ? "Tema Visual Exclusivo 'Farol de Luz' (Contraste Máximo)" :
+                     unlockedLevel === 10 ? "Selo de Glória do Templo 'Testemunha da Luz'" :
+                     unlockedLevel <= 15 ? `Aura de Foco Nível ${unlockedLevel} + Multiplicador de Frequência` :
+                     unlockedLevel <= 20 ? `Selo de Guardião da Fé + 10% de Bônus de Clamor` :
+                     unlockedLevel <= 30 ? `Insígnia Sagrada de Sentinela Nível ${unlockedLevel}` :
+                     unlockedLevel <= 40 ? `Graça Divina Amplificada + Medalha do Templo` :
+                     `Soberania Espiritual Máxima (Nível ${unlockedLevel})`}
+                  </span>
+                </div>
               </div>
 
-              <button
-                onClick={() => setShowLevelUpModal(false)}
-                className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md uppercase tracking-wider transition-colors active:scale-97 cursor-pointer"
-              >
-                Seguir em Presença Plena
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => setShowLevelUpModal(false)}
+                  className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md uppercase tracking-wider transition-colors active:scale-97 cursor-pointer"
+                >
+                  Seguir em Presença Plena
+                </button>
+                <button
+                  onClick={() => {
+                    setShowLevelUpModal(false);
+                    setActiveTab('stats');
+                    setActiveStatsSubTab('levels');
+                  }}
+                  className="w-full py-2.5 bg-slate-950 border border-slate-850 hover:bg-slate-900 text-slate-350 hover:text-slate-200 font-bold text-[11px] rounded-xl transition-all cursor-pointer"
+                >
+                  Ver Todos os Níveis e Requisitos
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
